@@ -304,7 +304,7 @@ def main():
         logging_steps=100,
         learning_rate=2e-5,
         max_grad_norm=1.0,
-        fp16=False,
+        fp16=True,
         warmup_ratio=0.1,
     )
     trainer = Trainer(
