@@ -4,7 +4,7 @@ from transformers import AutoTokenizer, AutoModel
 from datasets import load_dataset, Dataset # <-- Added Dataset
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier
-import recall_score
+from sklearn.metrics import recall_score
 import numpy as np
 from tqdm import tqdm
 import kagglehub # <-- Added
