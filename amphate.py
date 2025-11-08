@@ -85,15 +85,17 @@ class AmpleHateModel(BertPreTrainedModel):
 
         if torch.any(sample_has_explicit_target_mask):
             indices = sample_has_explicit_target_mask.nonzero(as_tuple=True)[0]
+
             h0_q_filtered = h0_q.index_select(0, indices)
             hidden_states_filtered = hidden_states.index_select(0, indices)
+            
             explicit_target_mask_filtered = explicit_target_mask.index_select(0, indices)
             exp_key_padding_mask_filtered = (explicit_target_mask_filtered == 0)
 
             r_exp_filtered, _ = self.relation_attention(
                 query=h0_q_filtered,
                 key=hidden_states_filtered,
-                value=hidden_states_filtered,
+                value=h0_q_filtered,
                 key_padding_mask=exp_key_padding_mask_filtered
             )
             r_exp.index_copy_(0, indices, r_exp_filtered)
@@ -210,7 +212,7 @@ def compute_metrics(p):
 def main():
     print("Setting up models and tokenizers...")
 
-    BASE_MODEL_NAME = "bert-base-uncased" # (论文使用 BERT-base )
+    BASE_MODEL_NAME = "bert-base-cased" # (论文使用 BERT-base )
     
     # NER Tagger from the paper 
     # Using 'dslim/bert-base-NER' as it's a widely used, high-quality NER model.
