@@ -301,7 +301,7 @@ def main():
         BASE_MODEL_NAME,
         config=config,
         lambda_val=1.0,
-        class_weights
+        class_weights=class_weights,
     )
     data_collator = DataCollatorWithPadding(tokenizer=base_tokenizer)
 
