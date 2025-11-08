@@ -67,19 +67,29 @@ class AmpleHateModel(BertPreTrainedModel):
         )
         hidden_states = encoder_outputs.last_hidden_state
 
-        # 2. ... (h0, h0_q) ...
+        # 1. GET h0 (The [CLS] token)
         h0 = hidden_states[:, 0, :]
-        h0_q = h0.unsqueeze(1)
+        h0_q = h0.unsqueeze(1) # Shape: [B, 1, H]
 
-        # r_imp, _ = self.relation_attention(
-        #     query=h0_q,
-        #     key=h0_q,
-        #     value=h0_q
-        # )
+        # ------------------- 🔻 这是正确的逻辑 🔻 -------------------
+
+        # 2. COMPUTE IMPLICIT RELATION (r_imp)
+        #    h0 attends to ALL tokens in the sequence (respecting padding).
+        pad_mask = (attention_mask == 0)
+
+        r_imp, _ = self.relation_attention(
+            query=h0_q,
+            key=hidden_states,
+            value=hidden_states,
+            key_padding_mask=pad_mask 
+        )
         
-        # 4. COMPUTE EXPLICIT RELATION (r_exp)
+        # 3. COMPUTE EXPLICIT RELATION (r_exp)
         sample_has_explicit_target_mask = torch.any(explicit_target_mask, dim=1)
-        r_exp = torch.zeros_like(h0_q)
+        
+        # r_exp starts as zeros, shape [B, 1, H]. 
+        # 使用 r_imp.dtype 确保类型一致 (处理 fp16)
+        r_exp = torch.zeros_like(r_imp) 
 
         if torch.any(sample_has_explicit_target_mask):
             indices = sample_has_explicit_target_mask.nonzero(as_tuple=True)[0]
@@ -101,36 +111,34 @@ class AmpleHateModel(BertPreTrainedModel):
                 value=hidden_states_filtered,
                 key_padding_mask=final_key_padding_mask 
             )
+            # 确保 dtype 匹配以进行 index_copy_
             r_exp.index_copy_(0, indices, r_exp_filtered.to(r_exp.dtype))
-        
-        r_unnormalized = h0_q.squeeze(1) + r_exp.squeeze(1)
-        r_normalized = self.relation_norm(r_unnormalized)
-    
-        # 4. GET FINAL RELATION VECTOR
-        # r is now *only* the explicit relation (or zeros if none)
-        r = r_normalized.squeeze(1)
 
-        # 5. DIRECT INJECTION (h0 + lambda * r_exp)
-        # z = h0 + (self.lambda_val * r) <-- [OLD]
-        #
-        # This is now:
-        # z = h0 + lambda * r_exp      (if target exists)
-        # z = h0 + lambda * 0 = h0     (if no target)
-        #
-        # This is numerically stable.
-        z = h0 + (self.lambda_val * r)
+        # 4. COMBINE RELATIONS
+        #    只组合 r_imp 和 r_exp。 *不要* 在这里包含 h0！
+        r_unnormalized = r_imp.squeeze(1) + r_exp.squeeze(1)
+
+        # 5. NORMALIZE THE COMBINED RELATION
+        #    使用 self.relation_norm 稳定 "r" 向量
+        r_normalized = self.relation_norm(r_unnormalized)
+
+        # 6. DIRECT INJECTION (h0 + r)
+        #    现在这是安全的：我们是在添加两个已归一化的向量
+        #    (h0 和 r_normalized)
+        z = h0 + (self.lambda_val * r_normalized)
         
-        # 6. STABILIZE
+        # 7. STABILIZE (Final Add & Norm)
+        #    使用 self.layer_norm 归一化 'h0 + r' 的 *结果*
         z = self.layer_norm(z)
         
-        # 7. CLASSIFICATION
+        # 8. CLASSIFICATION
         logits = self.classifier(z)
 
-        # 8. COMPUTE LOSS
+        # 9. COMPUTE LOSS
         loss = None
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss(weight=self.class_weights_buffer, label_smoothing=0.1)
-            loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            loss = loss_fct(logits.view(-_n, self.num_labels), labels.view(-1))
 
         return SequenceClassifierOutput(
             loss=loss,
