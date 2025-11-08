@@ -64,6 +64,95 @@ class AmpleHateModel(T5PreTrainedModel):
         labels: torch.LongTensor = None,
         **kwargs,
     ):
+        # 1. GET ENCODER HIDDEN STATES
+        encoder_outputs = self.encoder(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+        )
+        hidden_states = encoder_outputs.last_hidden_state
+
+        # 2. GET IMPLICIT TARGETS (h0)
+        h0 = hidden_states[:, 0, :]
+        h0_q = h0.unsqueeze(1)
+
+        # 3. COMPUTE IMPLICIT RELATION (r_imp)
+        # This is computed for every sample in the batch
+        r_imp, _ = self.relation_attention(
+            query=h0_q,
+            key=h0_q,
+            value=h0_q
+        )
+        # Shape: [batch_size, 1, d_model]
+
+        # 4. COMPUTE EXPLICIT RELATION (r_exp) --- PER-SAMPLE FIX ---
+
+        # 4a. Find which samples in the batch have *any* explicit targets
+        # Shape: [batch_size]
+        sample_has_explicit_target_mask = torch.any(explicit_target_mask, dim=1)
+
+        # 4b. Initialize r_exp as all zeros.
+        # Samples with no targets will keep this zero value.
+        r_exp = torch.zeros_like(r_imp)
+
+        # 4c. If *at least one* sample has targets, compute attention *only for them*
+        if torch.any(sample_has_explicit_target_mask):
+            
+            # --- Select only the samples that *have* targets ---
+            # We'll use these indices to filter all our tensors
+            indices = sample_has_explicit_target_mask.nonzero(as_tuple=True)[0]
+
+            # Filter all inputs for the attention call
+            h0_q_filtered = h0_q.index_select(0, indices)
+            hidden_states_filtered = hidden_states.index_select(0, indices)
+            
+            # Create the key_padding_mask *only* for the filtered samples
+            explicit_target_mask_filtered = explicit_target_mask.index_select(0, indices)
+            exp_key_padding_mask_filtered = (explicit_target_mask_filtered == 0)
+
+            # --- Compute attention on the subset ---
+            # This is now safe, as every sample here is guaranteed
+            # to have at least one `False` in its mask.
+            r_exp_filtered, _ = self.relation_attention(
+                query=h0_q_filtered,
+                key=hidden_states_filtered,
+                value=hidden_states_filtered,
+                key_padding_mask=exp_key_padding_mask_filtered
+            )
+            
+            # 4d. Scatter the results back into the all-zeros r_exp tensor
+            # This puts the computed results into the correct rows
+            r_exp.index_copy_(0, indices, r_exp_filtered)
+
+        # --- END OF PER-SAMPLE FIX ---
+
+        # 5. COMBINE RELATIONS
+        # r_imp and r_exp both have shape [batch_size, 1, d_model]
+        r = r_imp.squeeze(1) + r_exp.squeeze(1)
+        # Shape: [batch_size, d_model]
+
+        # 6. DIRECT INJECTION
+        z = h0 + (self.lambda_val * r)
+        
+        # 7. CLASSIFICATION
+        logits = self.classifier(z)
+
+        # 8. COMPUTE LOSS
+        loss = None
+        if labels is not None:
+            # --- FIX ---
+            # We remove the torch.isnan(logits) check.
+            # The robust r_exp logic prevents NaNs,
+            # and removing this check fixes the ValueError.
+            # -----------
+            loss_fct = nn.CrossEntropyLoss()
+            loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+
+        return SequenceClassifierOutput(
+            loss=loss,
+            logits=logits,
+            hidden_states=encoder_outputs.hidden_states,
+            attentions=encoder_outputs.attentions,
+        )
         encoder_outputs = self.encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -118,7 +207,7 @@ class AmpleHateModel(T5PreTrainedModel):
 # 2. Data Pre-processing (Implements "Target Identification")
 # ---------------------------------------------------------------------------
 
-# Define the NER labels AmpleHate considers "explicit targets" [cite: 85, 86]
+# Define the NER labels AmpleHate considers "explicit targets"
 TARGET_NER_LABELS = {"ORG", "NORP", "GPE", "LOC", "EVENT"}
 
 def create_preprocessing_function(tokenizer, ner_pipeline):
@@ -210,6 +299,7 @@ def main():
     # NER Tagger from the paper 
     # Using 'dslim/bert-base-NER' as it's a widely used, high-quality NER model.
     NER_MODEL_NAME = "dslim/bert-base-NER"
+    # NER_MODEL_NAME = "dslim/bert-large-NER"
 
     # --- Load Tokenizers and Pipelines ---
     t5_tokenizer = AutoTokenizer.from_pretrained(T5_MODEL_NAME)
@@ -268,8 +358,8 @@ def main():
     training_args = TrainingArguments(
         output_dir="./amplehate_results",
         num_train_epochs=3,
-        per_device_train_batch_size=4,
-        per_device_eval_batch_size=4,
+        per_device_train_batch_size=16,
+        per_device_eval_batch_size=16,
         logging_dir="./logs",
         logging_steps=10,
     )
