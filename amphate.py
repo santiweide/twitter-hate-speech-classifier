@@ -53,8 +53,6 @@ class AmpleHateModel(BertPreTrainedModel):
             self.register_buffer('class_weights_buffer', None)        # Initialize weights
         # self.post_init()  会强制使用 BERT 的 std=0.02 初始化来重写你的 LayerNorm 和 relation_attention 的权重
 
-    # --- 你的 `forward` 方法不需要修改 ---
-    # (因为 BertModel 的输出格式与 T5EncoderModel 兼容)
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -75,11 +73,12 @@ class AmpleHateModel(BertPreTrainedModel):
         h0_q = h0.unsqueeze(1)
 
         # 3. ... (r_imp) ...
-        r_imp, _ = self.relation_attention(
-            query=h0_q,
-            key=h0_q,
-            value=h0_q
-        )
+        with torch.autocast(device_type='cuda', dtype=torch.float32):
+            r_imp, _ = self.relation_attention(
+                query=h0_q,
+                key=h0_q,
+                value=h0_q
+            )
         
         # 4. COMPUTE EXPLICIT RELATION (r_exp)
         sample_has_explicit_target_mask = torch.any(explicit_target_mask, dim=1)
@@ -106,12 +105,13 @@ class AmpleHateModel(BertPreTrainedModel):
             final_key_padding_mask = pad_mask_filtered | non_target_mask_filtered
             # -----------------------------------------------------------------
 
-            r_exp_filtered, _ = self.relation_attention(
-                query=h0_q_filtered,
-                key=hidden_states_filtered,
-                value=hidden_states_filtered,
-                key_padding_mask=final_key_padding_mask # <--- Use the combined mask
-            )
+            with torch.autocast(device_type='cuda', dtype=torch.float32):
+                r_exp_filtered, _ = self.relation_attention(
+                    query=h0_q_filtered,
+                    key=hidden_states_filtered,
+                    value=hidden_states_filtered,
+                    key_padding_mask=final_key_padding_mask 
+                )
             r_exp.index_copy_(0, indices, r_exp_filtered)
 
         # 5. COMBINE RELATIONS
