@@ -49,7 +49,7 @@ class AmpleHateModel(BertPreTrainedModel):
         self.classifier = nn.Linear(config.hidden_size, self.num_labels) # <--- (可选) 
 
         # Initialize weights
-        self.post_init()
+        # self.post_init()
 
     # --- 你的 `forward` 方法不需要修改 ---
     # (因为 BertModel 的输出格式与 T5EncoderModel 兼容)
@@ -262,7 +262,8 @@ def main():
 
     df = df[['label', 'tweet']]
     df = df.rename(columns={"tweet": "text"})
-
+    df = df.dropna(subset=['text'])
+    
     dataset = Dataset.from_pandas(df)
     
     dataset = dataset.shuffle(seed=42).train_test_split(test_size=0.1)
