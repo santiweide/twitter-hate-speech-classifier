@@ -51,7 +51,7 @@ class AmpleHateModel(BertPreTrainedModel):
             self.register_buffer('class_weights_buffer', class_weights)
         else:
             self.register_buffer('class_weights_buffer', None)        # Initialize weights
-        self.post_init()
+        # self.post_init()  会强制使用 BERT 的 std=0.02 初始化来重写你的 LayerNorm 和 relation_attention 的权重
 
     # --- 你的 `forward` 方法不需要修改 ---
     # (因为 BertModel 的输出格式与 T5EncoderModel 兼容)
