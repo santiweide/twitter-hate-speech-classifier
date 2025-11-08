@@ -6,8 +6,8 @@ from transformers import (
     AutoConfig,
     AutoTokenizer,
     AutoModelForTokenClassification,
-    T5EncoderModel,
-    T5PreTrainedModel,
+    BertModel,
+    BertPreTrainedModel,
     TrainingArguments,
     Trainer,
     DataCollatorWithPadding,
@@ -25,37 +25,33 @@ from pathlib import Path
 # 1. The AmpleHate Model Architecture
 # ---------------------------------------------------------------------------
 
-class AmpleHateModel(T5PreTrainedModel):
+class AmpleHateModel(BertPreTrainedModel):
     """
-    Implementation of the AmpleHate model from the paper[cite: 2],
-    using a T5-style encoder as the backbone.
+    Implementation of the AmpleHate model from the paper,
+    using a BERT-style encoder as the backbone.
     """
     def __init__(self, config: AutoConfig, lambda_val: float = 1.0):
         super().__init__(config)
         self.num_labels = config.num_labels
         self.config = config
 
-        # Load the T5 encoder backbone
-        self.encoder = T5EncoderModel(config)
+        # Load the BERT encoder backbone 
+        self.encoder = BertModel(config, add_pooling_layer=False) 
 
-        # Per the paper, lambda controls the injection degree [cite: 150, 158]
+        # ... (lambda_val, relation_attention, classifier 保持不变) ...
         self.lambda_val = lambda_val
-
-        # Standard attention layer for Relation Computation [cite: 93]
-        # We use batch_first=True and a single head, as the paper implies
-        # a simple dot-product attention, not multi-head.
         self.relation_attention = nn.MultiheadAttention(
-            embed_dim=config.d_model,
+            embed_dim=config.hidden_size, # <--- (可选) 对 BERT 来说 d_model 通常叫 hidden_size
             num_heads=1,
             batch_first=True
         )
-
-        # Final classification head [cite: 147]
-        self.classifier = nn.Linear(config.d_model, self.num_labels)
+        self.classifier = nn.Linear(config.hidden_size, self.num_labels) # <--- (可选) 
 
         # Initialize weights
         self.post_init()
 
+    # --- 你的 `forward` 方法不需要修改 ---
+    # (因为 BertModel 的输出格式与 T5EncoderModel 兼容)
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -72,65 +68,40 @@ class AmpleHateModel(T5PreTrainedModel):
         hidden_states = encoder_outputs.last_hidden_state
 
         # 2. GET IMPLICIT TARGETS (h0)
+        # h0 is the [CLS] token embedding [cite: 91]
         h0 = hidden_states[:, 0, :]
         h0_q = h0.unsqueeze(1)
 
         # 3. COMPUTE IMPLICIT RELATION (r_imp)
-        # This is computed for every sample in the batch
         r_imp, _ = self.relation_attention(
             query=h0_q,
             key=h0_q,
             value=h0_q
         )
-        # Shape: [batch_size, 1, d_model]
-
+        
         # 4. COMPUTE EXPLICIT RELATION (r_exp) --- PER-SAMPLE FIX ---
-
-        # 4a. Find which samples in the batch have *any* explicit targets
-        # Shape: [batch_size]
         sample_has_explicit_target_mask = torch.any(explicit_target_mask, dim=1)
-
-        # 4b. Initialize r_exp as all zeros.
-        # Samples with no targets will keep this zero value.
         r_exp = torch.zeros_like(r_imp)
 
-        # 4c. If *at least one* sample has targets, compute attention *only for them*
         if torch.any(sample_has_explicit_target_mask):
-            
-            # --- Select only the samples that *have* targets ---
-            # We'll use these indices to filter all our tensors
             indices = sample_has_explicit_target_mask.nonzero(as_tuple=True)[0]
-
-            # Filter all inputs for the attention call
             h0_q_filtered = h0_q.index_select(0, indices)
             hidden_states_filtered = hidden_states.index_select(0, indices)
-            
-            # Create the key_padding_mask *only* for the filtered samples
             explicit_target_mask_filtered = explicit_target_mask.index_select(0, indices)
             exp_key_padding_mask_filtered = (explicit_target_mask_filtered == 0)
 
-            # --- Compute attention on the subset ---
-            # This is now safe, as every sample here is guaranteed
-            # to have at least one `False` in its mask.
             r_exp_filtered, _ = self.relation_attention(
                 query=h0_q_filtered,
                 key=hidden_states_filtered,
                 value=hidden_states_filtered,
                 key_padding_mask=exp_key_padding_mask_filtered
             )
-            
-            # 4d. Scatter the results back into the all-zeros r_exp tensor
-            # This puts the computed results into the correct rows
             r_exp.index_copy_(0, indices, r_exp_filtered)
 
-        # --- END OF PER-SAMPLE FIX ---
-
         # 5. COMBINE RELATIONS
-        # r_imp and r_exp both have shape [batch_size, 1, d_model]
         r = r_imp.squeeze(1) + r_exp.squeeze(1)
-        # Shape: [batch_size, d_model]
 
-        # 6. DIRECT INJECTION
+        # 6. DIRECT INJECTION [cite: 108, 148]
         z = h0 + (self.lambda_val * r)
         
         # 7. CLASSIFICATION
@@ -139,11 +110,6 @@ class AmpleHateModel(T5PreTrainedModel):
         # 8. COMPUTE LOSS
         loss = None
         if labels is not None:
-            # --- FIX ---
-            # We remove the torch.isnan(logits) check.
-            # The robust r_exp logic prevents NaNs,
-            # and removing this check fixes the ValueError.
-            # -----------
             loss_fct = nn.CrossEntropyLoss()
             loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
@@ -153,56 +119,6 @@ class AmpleHateModel(T5PreTrainedModel):
             hidden_states=encoder_outputs.hidden_states,
             attentions=encoder_outputs.attentions,
         )
-        encoder_outputs = self.encoder(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-        )
-        hidden_states = encoder_outputs.last_hidden_state
-
-        h0 = hidden_states[:, 0, :]
-        h0_q = h0.unsqueeze(1)
-
-        r_imp, _ = self.relation_attention(
-            query=h0_q,
-            key=h0_q,
-            value=h0_q
-        )
-
-        if torch.any(explicit_target_mask):
-            exp_key_padding_mask = (explicit_target_mask == 0)
-            r_exp, _ = self.relation_attention(
-                query=h0_q,
-                key=hidden_states,
-                value=hidden_states,
-                key_padding_mask=exp_key_padding_mask
-            )
-        else:
-            r_exp = torch.zeros_like(r_imp)
-
-        r = r_imp.squeeze(1) + r_exp.squeeze(1)
-
-        z = h0 + (self.lambda_val * r)
-        
-        logits = self.classifier(z)
-
-        loss = None
-        if labels is not None:
-            # Add a check for NaN logits *before* computing loss
-            # This helps with debugging if the problem persists.
-            if torch.isnan(logits).any():
-                print("Warning: NaN detected in logits. Skipping loss calculation.")
-            else:
-                loss_fct = nn.CrossEntropyLoss()
-                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
-            # --- END: STABILITY FIX ---
-
-        return SequenceClassifierOutput(
-            loss=loss,
-            logits=logits,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
-        )
-
 # ---------------------------------------------------------------------------
 # 2. Data Pre-processing (Implements "Target Identification")
 # ---------------------------------------------------------------------------
@@ -294,16 +210,15 @@ def compute_metrics(p):
 def main():
     print("Setting up models and tokenizers...")
 
-    T5_MODEL_NAME = "google/mt5-small"
-
+    BASE_MODEL_NAME = "bert-base-uncased" # (论文使用 BERT-base )
+    
     # NER Tagger from the paper 
     # Using 'dslim/bert-base-NER' as it's a widely used, high-quality NER model.
     NER_MODEL_NAME = "dslim/bert-base-NER"
     # NER_MODEL_NAME = "dslim/bert-large-NER"
 
     # --- Load Tokenizers and Pipelines ---
-    t5_tokenizer = AutoTokenizer.from_pretrained(T5_MODEL_NAME)
-
+    base_tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_NAME)
     # The NER model requires its own tokenizer and model
     ner_tokenizer = AutoTokenizer.from_pretrained(NER_MODEL_NAME)
     ner_model = AutoModelForTokenClassification.from_pretrained(NER_MODEL_NAME)
@@ -330,6 +245,7 @@ def main():
 
     df = df[['label', 'tweet']]
     df = df.rename(columns={"tweet": "text"})
+    df = df.sample(frac=0.01, random_state=42)
 
     dataset = Dataset.from_pandas(df)
     
@@ -337,41 +253,43 @@ def main():
     print(f"Dataset created: {dataset}")
 
     print("Pre-processing data (running NER target identification)...")
-    preprocess_fn = create_preprocessing_function(t5_tokenizer, ner_pipeline)
+    preprocess_fn = create_preprocessing_function(base_tokenizer, ner_pipeline)
     tokenized_datasets = dataset.map(preprocess_fn, batched=True)
-
+    
     tokenized_datasets.set_format("torch", columns=[
         "input_ids", "attention_mask", "explicit_target_mask", "labels"
     ])
 
     print(f"Loading AmpleHate model with {T5_MODEL_NAME} backbone...")
-    config = AutoConfig.from_pretrained(T5_MODEL_NAME, num_labels=2)
-
+    config = AutoConfig.from_pretrained(BASE_MODEL_NAME, num_labels=2)
     model = AmpleHateModel.from_pretrained(
-        T5_MODEL_NAME,
+        BASE_MODEL_NAME,
         config=config,
         lambda_val=1.0
     )
-
-    data_collator = DataCollatorWithPadding(tokenizer=t5_tokenizer)
+    data_collator = DataCollatorWithPadding(tokenizer=base_tokenizer)
 
     training_args = TrainingArguments(
         output_dir="./amplehate_results",
-        num_train_epochs=3,
+        num_train_epochs=6,
         per_device_train_batch_size=16,
         per_device_eval_batch_size=16,
         logging_dir="./logs",
         logging_steps=10,
+        learning_rate=2e-5, # <--- 关键：匹配论文 
+        max_grad_norm=1.0   # <--- 关键：添加梯度裁剪 (Gradient Clipping)
     )
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=tokenized_datasets["train"],
         eval_dataset=tokenized_datasets["test"],
-        tokenizer=t5_tokenizer,
+        tokenizer=base_tokenizer,
         data_collator=data_collator,
         compute_metrics=compute_metrics,
     )
+
+
 
     print("Starting training...")
     trainer.train()
