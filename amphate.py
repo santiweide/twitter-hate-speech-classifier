@@ -70,15 +70,15 @@ class AmpleHateModel(BertPreTrainedModel):
         h0 = hidden_states[:, 0, :]
         h0_q = h0.unsqueeze(1)
 
-        r_imp, _ = self.relation_attention(
-            query=h0_q,
-            key=h0_q,
-            value=h0_q
-        )
+        # r_imp, _ = self.relation_attention(
+        #     query=h0_q,
+        #     key=h0_q,
+        #     value=h0_q
+        # )
         
         # 4. COMPUTE EXPLICIT RELATION (r_exp)
         sample_has_explicit_target_mask = torch.any(explicit_target_mask, dim=1)
-        r_exp = torch.zeros_like(r_imp)
+        r_exp = torch.zeros_like(h0_q)
 
         if torch.any(sample_has_explicit_target_mask):
             indices = sample_has_explicit_target_mask.nonzero(as_tuple=True)[0]
@@ -86,20 +86,13 @@ class AmpleHateModel(BertPreTrainedModel):
             h0_q_filtered = h0_q.index_select(0, indices)
             hidden_states_filtered = hidden_states.index_select(0, indices)
             
-            # --- 🌟 FIX 1: Get the original padding mask for the filtered samples ---
             attention_mask_filtered = attention_mask.index_select(0, indices)
-            # pad_mask_filtered is True for [PAD] tokens
             pad_mask_filtered = (attention_mask_filtered == 0)
             
-            # Get the explicit target mask
             explicit_target_mask_filtered = explicit_target_mask.index_select(0, indices)
-            # non_target_mask_filtered is True for non-target tokens
             non_target_mask_filtered = (explicit_target_mask_filtered == 0)
 
-            # --- 🌟 FIX 2: Combine the masks ---
-            # We want to ignore a token if it is a [PAD] OR if it's not a target
             final_key_padding_mask = pad_mask_filtered | non_target_mask_filtered
-            # -----------------------------------------------------------------
 
             r_exp_filtered, _ = self.relation_attention(
                 query=h0_q_filtered,
@@ -109,19 +102,27 @@ class AmpleHateModel(BertPreTrainedModel):
             )
             r_exp.index_copy_(0, indices, r_exp_filtered)
 
-        # 5. COMBINE RELATIONS
-        r = r_imp.squeeze(1) + r_exp.squeeze(1)
+        # 4. GET FINAL RELATION VECTOR
+        # r is now *only* the explicit relation (or zeros if none)
+        r = r_exp.squeeze(1)
 
-        # 6. DIRECT INJECTION
+        # 5. DIRECT INJECTION (h0 + lambda * r_exp)
+        # z = h0 + (self.lambda_val * r) <-- [OLD]
+        #
+        # This is now:
+        # z = h0 + lambda * r_exp      (if target exists)
+        # z = h0 + lambda * 0 = h0     (if no target)
+        #
+        # This is numerically stable.
         z = h0 + (self.lambda_val * r)
         
-        # 7. STABILIZE (Keep this from last time)
+        # 6. STABILIZE
         z = self.layer_norm(z)
         
-        # 8. CLASSIFICATION
+        # 7. CLASSIFICATION
         logits = self.classifier(z)
 
-        # 9. COMPUTE LOSS (was 8)
+        # 8. COMPUTE LOSS
         loss = None
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss(weight=self.class_weights_buffer, label_smoothing=0.1)
@@ -133,6 +134,7 @@ class AmpleHateModel(BertPreTrainedModel):
             hidden_states=encoder_outputs.hidden_states,
             attentions=encoder_outputs.attentions,
         )
+
 # ---------------------------------------------------------------------------
 # 2. Data Pre-processing (Implements "Target Identification")
 # ---------------------------------------------------------------------------
