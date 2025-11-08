@@ -247,7 +247,6 @@ def main():
 
     df = df[['label', 'tweet']]
     df = df.rename(columns={"tweet": "text"})
-    df = df.sample(frac=0.01, random_state=42)
 
     dataset = Dataset.from_pandas(df)
     
@@ -280,6 +279,7 @@ def main():
         logging_steps=10,
         learning_rate=2e-5, # <--- 关键：匹配论文 
         max_grad_norm=1.0   # <--- 关键：添加梯度裁剪 (Gradient Clipping)
+        fp16=False
     )
     trainer = Trainer(
         model=model,
