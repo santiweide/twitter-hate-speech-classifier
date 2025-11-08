@@ -21,9 +21,11 @@ import pandas as pd
 from pathlib import Path
 
 
-# ---------------------------------------------------------------------------
-# 1. The AmpleHate Model Architecture
-# ---------------------------------------------------------------------------
+# --- Evaluation Results ---
+# Accuracy: 0.9540
+# F1 (Macro): 0.8195
+# Recall (Macro): 0.8036
+# --------------------------
 
 class AmpleHateModel(BertPreTrainedModel):
     """
@@ -35,13 +37,11 @@ class AmpleHateModel(BertPreTrainedModel):
         self.num_labels = config.num_labels
         self.config = config
 
-        # Load the BERT encoder backbone 
         self.encoder = BertModel(config, add_pooling_layer=False) 
 
-        # ... (lambda_val, relation_attention, classifier 保持不变) ...
         self.lambda_val = lambda_val
         self.relation_attention = nn.MultiheadAttention(
-            embed_dim=config.hidden_size, # 对 BERT 来说 d_model 通常叫 hidden_size
+            embed_dim=config.hidden_size,
             num_heads=1,
             batch_first=True
         )
@@ -50,18 +50,16 @@ class AmpleHateModel(BertPreTrainedModel):
         if class_weights is not None:
             self.register_buffer('class_weights_buffer', class_weights)
         else:
-            self.register_buffer('class_weights_buffer', None)        # Initialize weights
-        # self.post_init()  会强制使用 BERT 的 std=0.02 初始化来重写你的 LayerNorm 和 relation_attention 的权重
+            self.register_buffer('class_weights_buffer', None)
 
     def forward(
         self,
         input_ids: torch.LongTensor = None,
         attention_mask: torch.FloatTensor = None,
-        explicit_target_mask: torch.LongTensor = None, # Provided by the preprocessor
+        explicit_target_mask: torch.LongTensor = None,
         labels: torch.LongTensor = None,
         **kwargs,
     ):
-        # 1. ... (encoder_outputs, hidden_states) ...
         encoder_outputs = self.encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -152,8 +150,7 @@ def create_preprocessing_function(tokenizer):
     def preprocess_function(examples):
         texts = examples["text"]
 
-        # 1. Tokenize for the main model
-        t5_inputs = tokenizer(
+        bert_inputs = tokenizer(
             texts,
             truncation=True,
             padding="max_length",
@@ -166,27 +163,20 @@ def create_preprocessing_function(tokenizer):
 
         batch_explicit_masks = []
 
-        # 3. Align NER results with T5 tokens
         for i in range(len(texts)):
-            offsets = t5_inputs["offset_mapping"][i]
-            # Handle cases where ner_pipeline might return a single dict instead of a list
+            offsets = bert_inputs["offset_mapping"][i]
             ner_results = all_ner_results[i] if isinstance(all_ner_results[i], list) else [all_ner_results[i]]
 
             explicit_mask = [0] * len(offsets)
 
-            # Get all target entities for this sentence
             target_entities = [
                 e for e in ner_results
-                # --- THIS IS THE FIX ---
-                # Changed 'entity' to 'entity_group' and removed .split()
                 if e['entity_group'] in TARGET_NER_LABELS
-                # -----------------------
             ]
 
             for entity in target_entities:
                 ent_start, ent_end = entity["start"], entity["end"]
 
-                # Find all tokens that overlap with this entity
                 for token_idx, (tok_start, tok_end) in enumerate(offsets):
                     if tok_start == tok_end:
                         continue
@@ -196,9 +186,9 @@ def create_preprocessing_function(tokenizer):
 
             batch_explicit_masks.append(explicit_mask)
 
-        t5_inputs["explicit_target_mask"] = batch_explicit_masks
-        t5_inputs["labels"] = examples["label"]
-        return t5_inputs
+        bert_inputs["explicit_target_mask"] = batch_explicit_masks
+        bert_inputs["labels"] = examples["label"]
+        return bert_inputs
 
     return preprocess_function
 
@@ -221,21 +211,16 @@ def compute_metrics(p):
         "recall": recall,
     }
 
-# ---------------------------------------------------------------------------
-# 4. Main Training Script
-# ---------------------------------------------------------------------------
+
 
 def main():
     print("Setting up models and tokenizers...")
 
-    BASE_MODEL_NAME = "bert-base-cased" # (论文使用 BERT-base )
-    
-    # NER Tagger from the paper 
-    # Using 'dslim/bert-base-NER' as it's a widely used, high-quality NER model.
-    NER_MODEL_NAME = "dslim/bert-base-NER"
-    # NER_MODEL_NAME = "dslim/bert-large-NER"
+    BASE_MODEL_NAME = "bert-base-cased"
 
-    # --- Load Tokenizers and Pipelines ---
+    # NER Tagger from the paper 
+    NER_MODEL_NAME = "dslim/bert-base-NER"
+
     base_tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_NAME)
     ner_tokenizer = AutoTokenizer.from_pretrained(NER_MODEL_NAME)
     ner_model = AutoModelForTokenClassification.from_pretrained(NER_MODEL_NAME)
@@ -266,29 +251,24 @@ def main():
     class_counts = df['label'].value_counts()
     num_samples = len(df)
     
-    # 2. Calculate weights (inversely proportional to frequency)
-    #    weights = num_samples / (num_classes * class_counts)
     num_classes = len(class_counts)
     weights = num_samples / (num_classes * class_counts)
     
-    # 3. Sort weights by label (0, then 1) and convert to a tensor
     weights = weights.sort_index()
     class_weights = torch.tensor(weights.values, dtype=torch.float32)
-    print(f"Class Weights: {class_weights}") # You will see the 'hate' class has a much higher weight
+    print(f"Class Weights: {class_weights}")
 
     dataset = Dataset.from_pandas(df)
     
     dataset = dataset.shuffle(seed=42).train_test_split(test_size=0.1)
     print(f"Dataset created: {dataset}")
 
-    # --- 🌟 NEW EFFICIENCY STEP: PRE-COMPUTE ALL NER 🌟 ---
     print("Pre-computing NER results for TRAIN set... (This will be cached by 'datasets')")
-    # 1. Get all texts from the train split
+
     train_texts = dataset["train"]["text"]
-    # 2. Run the pipeline on all texts at once for max GPU efficiency
-    #    (Adjust batch_size based on your GPU VRAM)
+
     train_ner_results = ner_pipeline(train_texts, batch_size=64) 
-    # 3. Add these results as a new column
+
     dataset["train"] = dataset["train"].add_column("ner_results", train_ner_results)
     
     print("Pre-computing NER results for TEST set... (This will be cached by 'datasets')")
@@ -322,8 +302,8 @@ def main():
         per_device_eval_batch_size=16,
         logging_dir="./logs",
         logging_steps=100,
-        learning_rate=2e-5, # <--- 关键：匹配论文 
-        max_grad_norm=1.0,  # <--- 关键：添加梯度裁剪 (Gradient Clipping)
+        learning_rate=2e-5,
+        max_grad_norm=1.0,
         fp16=False,
         warmup_ratio=0.1,
     )
