@@ -41,14 +41,16 @@ class AmpleHateModel(BertPreTrainedModel):
         # ... (lambda_val, relation_attention, classifier 保持不变) ...
         self.lambda_val = lambda_val
         self.relation_attention = nn.MultiheadAttention(
-            embed_dim=config.hidden_size, # <--- (可选) 对 BERT 来说 d_model 通常叫 hidden_size
+            embed_dim=config.hidden_size, # 对 BERT 来说 d_model 通常叫 hidden_size
             num_heads=1,
             batch_first=True
         )
         self.layer_norm = nn.LayerNorm(config.hidden_size)
-        self.classifier = nn.Linear(config.hidden_size, self.num_labels) # <--- (可选) 
-        self.class_weights = class_weights
-        # Initialize weights
+        self.classifier = nn.Linear(config.hidden_size, self.num_labels)
+        if class_weights is not None:
+            self.register_buffer('class_weights_buffer', class_weights)
+        else:
+            self.register_buffer('class_weights_buffer', None)        # Initialize weights
         self.post_init()
 
     # --- 你的 `forward` 方法不需要修改 ---
