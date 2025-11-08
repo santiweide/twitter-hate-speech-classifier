@@ -260,7 +260,7 @@ def main():
         "input_ids", "attention_mask", "explicit_target_mask", "labels"
     ])
 
-    print(f"Loading AmpleHate model with {T5_MODEL_NAME} backbone...")
+    print(f"Loading AmpleHate model with {BASE_MODEL_NAME} backbone...")
     config = AutoConfig.from_pretrained(BASE_MODEL_NAME, num_labels=2)
     model = AmpleHateModel.from_pretrained(
         BASE_MODEL_NAME,
