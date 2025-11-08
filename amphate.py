@@ -316,13 +316,6 @@ def main():
         max_grad_norm=1.0,  # <--- 关键：添加梯度裁剪 (Gradient Clipping)
         fp16=True,
         label_smoothing_factor=0.1,
-        evaluation_strategy="steps",     # Evaluate at the same frequency as logging
-        eval_steps=100,                  # Evaluate every 100 steps
-        save_strategy="steps",           # Save checkpoint at the same frequency
-        save_steps=100,                  # Save every 100 steps
-        load_best_model_at_end=True,     # Load the best model (based on F1) at the end
-        metric_for_best_model="f1",      # Use F1-score to find the best model, not loss
-        greater_is_better=True,          # Higher F1 is better
     )
     trainer = Trainer(
         model=model,
