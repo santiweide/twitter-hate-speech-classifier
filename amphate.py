@@ -145,15 +145,17 @@ class AmpleHateModel(BertPreTrainedModel):
 # Define the NER labels AmpleHate considers "explicit targets"
 TARGET_NER_LABELS = {"ORG", "NORP", "GPE", "LOC", "EVENT"}
 
-def create_preprocessing_function(tokenizer, ner_pipeline):
+# --- 🌟 MODIFIED FUNCTION 🌟 ---
+def create_preprocessing_function(tokenizer):
     """
     Creates a function to preprocess text data, aligning NER tags
     with the main model's tokenizer.
+    ASSUMES the 'ner_results' column already exists.
     """
     def preprocess_function(examples):
         texts = examples["text"]
 
-        # 1. Tokenize for the T5 model
+        # 1. Tokenize for the main model
         t5_inputs = tokenizer(
             texts,
             truncation=True,
@@ -162,8 +164,8 @@ def create_preprocessing_function(tokenizer, ner_pipeline):
             return_offsets_mapping=True
         )
 
-        # 2. Run NER pipeline on the raw texts
-        all_ner_results = ner_pipeline(texts)
+        # 2. Get pre-computed NER results from the column
+        all_ner_results = examples["ner_results"] # <--- READS FROM COLUMN
 
         batch_explicit_masks = []
 
@@ -238,11 +240,9 @@ def main():
 
     # --- Load Tokenizers and Pipelines ---
     base_tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_NAME)
-    # The NER model requires its own tokenizer and model
     ner_tokenizer = AutoTokenizer.from_pretrained(NER_MODEL_NAME)
     ner_model = AutoModelForTokenClassification.from_pretrained(NER_MODEL_NAME)
 
-    # We aggregate to combine B- and I- tags (e.g., B-GPE, I-GPE -> GPE)
     ner_pipeline = pipeline(
         "ner",
         model=ner_model,
@@ -277,11 +277,6 @@ def main():
     # 3. Sort weights by label (0, then 1) and convert to a tensor
     weights = weights.sort_index()
     class_weights = torch.tensor(weights.values, dtype=torch.float32)
-    
-    # Move weights to the same device as the model
-    # device = "cuda" if torch.cuda.is_available() else "cpu"
-    # class_weights = class_weights.to(device)
-    
     print(f"Class Weights: {class_weights}") # You will see the 'hate' class has a much higher weight
 
     dataset = Dataset.from_pandas(df)
@@ -289,10 +284,26 @@ def main():
     dataset = dataset.shuffle(seed=42).train_test_split(test_size=0.1)
     print(f"Dataset created: {dataset}")
 
-    print("Pre-processing data (running NER target identification)...")
-    preprocess_fn = create_preprocessing_function(base_tokenizer, ner_pipeline)
-    tokenized_datasets = dataset.map(preprocess_fn, batched=True)
+    # --- 🌟 NEW EFFICIENCY STEP: PRE-COMPUTE ALL NER 🌟 ---
+    print("Pre-computing NER results for TRAIN set... (This will be cached by 'datasets')")
+    # 1. Get all texts from the train split
+    train_texts = dataset["train"]["text"]
+    # 2. Run the pipeline on all texts at once for max GPU efficiency
+    #    (Adjust batch_size based on your GPU VRAM)
+    train_ner_results = ner_pipeline(train_texts, batch_size=64) 
+    # 3. Add these results as a new column
+    dataset["train"] = dataset["train"].add_column("ner_results", train_ner_results)
     
+    print("Pre-computing NER results for TEST set... (This will be cached by 'datasets')")
+    test_texts = dataset["test"]["text"]
+    test_ner_results = ner_pipeline(test_texts, batch_size=64)
+    dataset["test"] = dataset["test"].add_column("ner_results", test_ner_results)
+    
+    print("NER results pre-computed and added to dataset.")
+
+    print("Pre-processing data (running alignment and tokenization)...")
+    preprocess_fn = create_preprocessing_function(base_tokenizer)    
+    tokenized_datasets = dataset.map(preprocess_fn, batched=True)
     tokenized_datasets.set_format("torch", columns=[
         "input_ids", "attention_mask", "explicit_target_mask", "labels"
     ])
@@ -316,7 +327,7 @@ def main():
         logging_steps=100,
         learning_rate=2e-5, # <--- 关键：匹配论文 
         max_grad_norm=1.0,  # <--- 关键：添加梯度裁剪 (Gradient Clipping)
-        fp16=True,
+        fp16=False,
     )
     trainer = Trainer(
         model=model,
