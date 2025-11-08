@@ -292,7 +292,7 @@ def main():
     model = AmpleHateModel.from_pretrained(
         BASE_MODEL_NAME,
         config=config,
-        lambda_val=1.0,
+        lambda_val=0.1,
         class_weights=class_weights,
     )
     data_collator = DataCollatorWithPadding(tokenizer=base_tokenizer)
