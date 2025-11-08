@@ -294,7 +294,8 @@ def main():
         logging_steps=10,
         learning_rate=2e-5, # <--- 关键：匹配论文 
         max_grad_norm=1.0,  # <--- 关键：添加梯度裁剪 (Gradient Clipping)
-        fp16=False
+        fp16=False,
+        label_smoothing_factor=0.1
     )
     trainer = Trainer(
         model=model,
