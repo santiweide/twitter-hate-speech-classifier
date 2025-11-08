@@ -22,9 +22,9 @@ from pathlib import Path
 
 
 # --- Evaluation Results ---
-# Accuracy: 0.9540
-# F1 (Macro): 0.8195
-# Recall (Macro): 0.8036
+# Accuracy: 0.9634
+# F1 (Macro): 0.8664
+# Recall (Macro): 0.8760
 # --------------------------
 
 class AmpleHateModel(BertPreTrainedModel):
