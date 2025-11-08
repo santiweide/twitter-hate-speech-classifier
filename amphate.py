@@ -100,7 +100,7 @@ class AmpleHateModel(BertPreTrainedModel):
                 value=hidden_states_filtered,
                 key_padding_mask=final_key_padding_mask 
             )
-            r_exp.index_copy_(0, indices, r_exp_filtered)
+            r_exp.index_copy_(0, indices, r_exp_filtered.to(r_exp.dtype))
 
         # 4. GET FINAL RELATION VECTOR
         # r is now *only* the explicit relation (or zeros if none)
