@@ -30,7 +30,7 @@ class AmpleHateModel(BertPreTrainedModel):
     Implementation of the AmpleHate model from the paper,
     using a BERT-style encoder as the backbone.
     """
-    def __init__(self, config: AutoConfig, lambda_val: float = 1.0):
+    def __init__(self, config: AutoConfig, lambda_val: float = 1.0, class_weights: torch.Tensor = None):
         super().__init__(config)
         self.num_labels = config.num_labels
         self.config = config
@@ -47,9 +47,9 @@ class AmpleHateModel(BertPreTrainedModel):
         )
         self.layer_norm = nn.LayerNorm(config.hidden_size)
         self.classifier = nn.Linear(config.hidden_size, self.num_labels) # <--- (可选) 
-
+        self.class_weights = class_weights
         # Initialize weights
-        # self.post_init()
+        self.post_init()
 
     # --- 你的 `forward` 方法不需要修改 ---
     # (因为 BertModel 的输出格式与 T5EncoderModel 兼容)
@@ -127,7 +127,7 @@ class AmpleHateModel(BertPreTrainedModel):
         # 9. COMPUTE LOSS (was 8)
         loss = None
         if labels is not None:
-            loss_fct = nn.CrossEntropyLoss()
+            loss_fct = nn.CrossEntropyLoss(weight=self.class_weights)
             loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
         return SequenceClassifierOutput(
@@ -264,6 +264,24 @@ def main():
     df = df.rename(columns={"tweet": "text"})
     df = df.dropna(subset=['text'])
     
+    class_counts = df['label'].value_counts()
+    num_samples = len(df)
+    
+    # 2. Calculate weights (inversely proportional to frequency)
+    #    weights = num_samples / (num_classes * class_counts)
+    num_classes = len(class_counts)
+    weights = num_samples / (num_classes * class_counts)
+    
+    # 3. Sort weights by label (0, then 1) and convert to a tensor
+    weights = weights.sort_index()
+    class_weights = torch.tensor(weights.values, dtype=torch.float32)
+    
+    # Move weights to the same device as the model
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    class_weights = class_weights.to(device)
+    
+    print(f"Class Weights: {class_weights}") # You will see the 'hate' class has a much higher weight
+
     dataset = Dataset.from_pandas(df)
     
     dataset = dataset.shuffle(seed=42).train_test_split(test_size=0.1)
@@ -282,7 +300,8 @@ def main():
     model = AmpleHateModel.from_pretrained(
         BASE_MODEL_NAME,
         config=config,
-        lambda_val=1.0
+        lambda_val=1.0,
+        class_weights
     )
     data_collator = DataCollatorWithPadding(tokenizer=base_tokenizer)
 
@@ -292,11 +311,18 @@ def main():
         per_device_train_batch_size=16,
         per_device_eval_batch_size=16,
         logging_dir="./logs",
-        logging_steps=10,
+        logging_steps=100,
         learning_rate=2e-5, # <--- 关键：匹配论文 
         max_grad_norm=1.0,  # <--- 关键：添加梯度裁剪 (Gradient Clipping)
-        fp16=False,
+        fp16=True,
         label_smoothing_factor=0.1
+        evaluation_strategy="steps",     # Evaluate at the same frequency as logging
+        eval_steps=100,                  # Evaluate every 100 steps
+        save_strategy="steps",           # Save checkpoint at the same frequency
+        save_steps=100,                  # Save every 100 steps
+        load_best_model_at_end=True,     # Load the best model (based on F1) at the end
+        metric_for_best_model="f1",      # Use F1-score to find the best model, not loss
+        greater_is_better=True,          # Higher F1 is better
     )
     trainer = Trainer(
         model=model,
