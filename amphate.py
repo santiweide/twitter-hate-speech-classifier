@@ -61,26 +61,25 @@ class AmpleHateModel(BertPreTrainedModel):
         labels: torch.LongTensor = None,
         **kwargs,
     ):
-        # 1. GET ENCODER HIDDEN STATES
+        # 1. ... (encoder_outputs, hidden_states) ...
         encoder_outputs = self.encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
         )
         hidden_states = encoder_outputs.last_hidden_state
 
-        # 2. GET IMPLICIT TARGETS (h0)
-        # h0 is the [CLS] token embedding [cite: 91]
+        # 2. ... (h0, h0_q) ...
         h0 = hidden_states[:, 0, :]
         h0_q = h0.unsqueeze(1)
 
-        # 3. COMPUTE IMPLICIT RELATION (r_imp)
+        # 3. ... (r_imp) ...
         r_imp, _ = self.relation_attention(
             query=h0_q,
             key=h0_q,
             value=h0_q
         )
         
-        # 4. COMPUTE EXPLICIT RELATION (r_exp) --- PER-SAMPLE FIX ---
+        # 4. COMPUTE EXPLICIT RELATION (r_exp)
         sample_has_explicit_target_mask = torch.any(explicit_target_mask, dim=1)
         r_exp = torch.zeros_like(r_imp)
 
@@ -90,27 +89,42 @@ class AmpleHateModel(BertPreTrainedModel):
             h0_q_filtered = h0_q.index_select(0, indices)
             hidden_states_filtered = hidden_states.index_select(0, indices)
             
+            # --- 🌟 FIX 1: Get the original padding mask for the filtered samples ---
+            attention_mask_filtered = attention_mask.index_select(0, indices)
+            # pad_mask_filtered is True for [PAD] tokens
+            pad_mask_filtered = (attention_mask_filtered == 0)
+            
+            # Get the explicit target mask
             explicit_target_mask_filtered = explicit_target_mask.index_select(0, indices)
-            exp_key_padding_mask_filtered = (explicit_target_mask_filtered == 0)
+            # non_target_mask_filtered is True for non-target tokens
+            non_target_mask_filtered = (explicit_target_mask_filtered == 0)
+
+            # --- 🌟 FIX 2: Combine the masks ---
+            # We want to ignore a token if it is a [PAD] OR if it's not a target
+            final_key_padding_mask = pad_mask_filtered | non_target_mask_filtered
+            # -----------------------------------------------------------------
 
             r_exp_filtered, _ = self.relation_attention(
                 query=h0_q_filtered,
                 key=hidden_states_filtered,
                 value=hidden_states_filtered,
-                key_padding_mask=exp_key_padding_mask_filtered
+                key_padding_mask=final_key_padding_mask # <--- Use the combined mask
             )
             r_exp.index_copy_(0, indices, r_exp_filtered)
 
         # 5. COMBINE RELATIONS
         r = r_imp.squeeze(1) + r_exp.squeeze(1)
 
-        # 6. DIRECT INJECTION [cite: 108, 148]
+        # 6. DIRECT INJECTION
         z = h0 + (self.lambda_val * r)
+        
+        # 7. STABILIZE (Keep this from last time)
         z = self.layer_norm(z)
-        # 7. CLASSIFICATION
+        
+        # 8. CLASSIFICATION
         logits = self.classifier(z)
 
-        # 8. COMPUTE LOSS
+        # 9. COMPUTE LOSS (was 8)
         loss = None
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss()
