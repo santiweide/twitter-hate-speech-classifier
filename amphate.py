@@ -245,6 +245,11 @@ def main():
     df = df.rename(columns={"tweet": "text"})
     df = df.dropna(subset=['text'])
     
+    dataset = Dataset.from_pandas(df)
+    
+    dataset = dataset.shuffle(seed=42).train_test_split(test_size=0.1)
+    print(f"Dataset created: {dataset}")
+
     class_counts = df['label'].value_counts()
     num_samples = len(df)
     
@@ -255,10 +260,6 @@ def main():
     class_weights = torch.tensor(weights.values, dtype=torch.float32)
     print(f"Class Weights: {class_weights}")
 
-    dataset = Dataset.from_pandas(df)
-    
-    dataset = dataset.shuffle(seed=42).train_test_split(test_size=0.1)
-    print(f"Dataset created: {dataset}")
 
     print("Pre-computing NER results for TRAIN set... (This will be cached by 'datasets')")
 

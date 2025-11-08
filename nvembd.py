@@ -1,19 +1,25 @@
 import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModel
-from datasets import load_dataset
+from datasets import load_dataset, Dataset # <-- Added Dataset
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.metrics import accuracy_score, f1_score, recall_score
+import recall_score
 import numpy as np
 from tqdm import tqdm
+import kagglehub # <-- Added
+import pandas as pd # <-- Added
+from pathlib import Path # <-- Added
 
 # --- Configuration ---
 # Use the official pre-trained model as requested
 MODEL_NAME = "nvidia/NV-Embed-v2"
-DATASET_NAME = "davidson/hate_speech_offensive"
+# DATASET_NAME = "davidson/hate_speech_offensive" # <-- Replaced
+DATASET_NAME = "vkrahul/twitter-hate-speech"
+DATASET_FILE = "train_E6oV3lV.csv"
 # Instruction for MTEB-style classification
-INSTRUCTION = "Classify the given tweet as hate speech, offensive, or neither."
+# INSTRUCTION = "Classify the given tweet as hate speech, offensive, or neither." # <-- Replaced
+INSTRUCTION = "Classify the given tweet as hate speech or not."
 
 # Hyperparameters
 MAX_LENGTH = 512 # Paper evaluates at 512, but can be longer
@@ -30,28 +36,48 @@ def main():
     model = AutoModel.from_pretrained(MODEL_NAME, trust_remote_code=True).to(device)
     # The .encode() method comes with the model, no tokenizer needed separately
     
-    # --- 2. Load and Split Dataset ---
-    print(f"Loading dataset: {DATASET_NAME}")
-    dataset = load_dataset(DATASET_NAME)['train']
-    # Re-map labels to be 0, 1, 2
-    data_list = [{"tweet": item['tweet'], "class": item['class']} for item in dataset]
-    
-    # Split data
-    train_data, test_data = train_test_split(
-        data_list, 
-        test_size=0.2, 
-        random_state=42, 
-        stratify=[d['class'] for d in data_list]
-    )
-    
-    print(f"Total samples: {len(data_list)}, Train: {len(train_data)}, Test: {len(test_data)}")
+    print(f"Downloading dataset: {DATASET_NAME}") # <-- Your new code starts here
+    path = kagglehub.dataset_download(DATASET_NAME)
+    print(f"Dataset downloaded to: {path}")
 
-    # Prepare texts and labels
-    train_texts = [d['tweet'] for d in train_data]
-    train_labels = np.array([d['class'] for d in train_data])
+    data_file_path = Path(path) / DATASET_FILE
     
-    test_texts = [d['tweet'] for d in test_data]
-    test_labels = np.array([d['class'] for d in test_data])
+    if not data_file_path.exists():
+        print(f"Error: Could not find '{DATASET_FILE}' in {path}")
+        return
+
+    print(f"Loading data from {data_file_path}...")
+    df = pd.read_csv(data_file_path)
+
+    df = df[['label', 'tweet']]
+    df = df.rename(columns={"tweet": "text"})
+    df = df.dropna(subset=['text'])
+    
+    class_counts = df['label'].value_counts()
+    num_samples = len(df)
+    
+    num_classes = len(class_counts)
+    weights = num_samples / (num_classes * class_counts)
+    
+    weights = weights.sort_index()
+    class_weights = torch.tensor(weights.values, dtype=torch.float32)
+    print(f"Class Weights: {class_weights}")
+
+    dataset_full = Dataset.from_pandas(df)
+    
+    # User wants 0.1 test split
+    dataset_split = dataset_full.shuffle(seed=42).train_test_split(test_size=0.1)
+    print(f"Dataset created: {dataset_split}")
+
+    # Prepare texts and labels from the new dataset split object
+    train_texts = dataset_split['train']['text']
+    train_labels = np.array(dataset_split['train']['label'])
+    
+    test_texts = dataset_split['test']['text']
+    test_labels = np.array(dataset_split['test']['label'])
+
+    print(f"Total samples: {len(dataset_full)}, Train: {len(train_texts)}, Test: {len(test_texts)}")
+    # <-- Your new code ends here
 
     # --- 3. Generate Embeddings ---
     # Add the required instruction prefix for classification
