@@ -71,10 +71,6 @@ class AmpleHateModel(BertPreTrainedModel):
         h0 = hidden_states[:, 0, :]
         h0_q = h0.unsqueeze(1) # Shape: [B, 1, H]
 
-        # ------------------- 🔻 这是正确的逻辑 🔻 -------------------
-
-        # 2. COMPUTE IMPLICIT RELATION (r_imp)
-        #    h0 attends to ALL tokens in the sequence (respecting padding).
         pad_mask = (attention_mask == 0)
 
         r_imp, _ = self.relation_attention(
@@ -88,7 +84,6 @@ class AmpleHateModel(BertPreTrainedModel):
         sample_has_explicit_target_mask = torch.any(explicit_target_mask, dim=1)
         
         # r_exp starts as zeros, shape [B, 1, H]. 
-        # 使用 r_imp.dtype 确保类型一致 (处理 fp16)
         r_exp = torch.zeros_like(r_imp) 
 
         if torch.any(sample_has_explicit_target_mask):
@@ -111,30 +106,18 @@ class AmpleHateModel(BertPreTrainedModel):
                 value=hidden_states_filtered,
                 key_padding_mask=final_key_padding_mask 
             )
-            # 确保 dtype 匹配以进行 index_copy_
             r_exp.index_copy_(0, indices, r_exp_filtered.to(r_exp.dtype))
 
-        # 4. COMBINE RELATIONS
-        #    只组合 r_imp 和 r_exp。 *不要* 在这里包含 h0！
         r_unnormalized = r_imp.squeeze(1) + r_exp.squeeze(1)
 
-        # 5. NORMALIZE THE COMBINED RELATION
-        #    使用 self.relation_norm 稳定 "r" 向量
         r_normalized = self.relation_norm(r_unnormalized)
 
-        # 6. DIRECT INJECTION (h0 + r)
-        #    现在这是安全的：我们是在添加两个已归一化的向量
-        #    (h0 和 r_normalized)
         z = h0 + (self.lambda_val * r_normalized)
         
-        # 7. STABILIZE (Final Add & Norm)
-        #    使用 self.layer_norm 归一化 'h0 + r' 的 *结果*
         z = self.layer_norm(z)
         
-        # 8. CLASSIFICATION
         logits = self.classifier(z)
 
-        # 9. COMPUTE LOSS
         loss = None
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss(weight=self.class_weights_buffer, label_smoothing=0.1)
@@ -318,7 +301,7 @@ def main():
         logging_steps=100,
         learning_rate=2e-5,
         max_grad_norm=1.0,
-        fp16=True,
+        fp16=False,
         warmup_ratio=0.1,
     )
     trainer = Trainer(
