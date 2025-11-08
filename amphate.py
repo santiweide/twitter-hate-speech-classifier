@@ -127,7 +127,7 @@ class AmpleHateModel(BertPreTrainedModel):
         # 9. COMPUTE LOSS (was 8)
         loss = None
         if labels is not None:
-            loss_fct = nn.CrossEntropyLoss(weight=self.class_weights)
+            loss_fct = nn.CrossEntropyLoss(weight=self.class_weights, label_smoothing=0.1)
             loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
         return SequenceClassifierOutput(
@@ -315,7 +315,6 @@ def main():
         learning_rate=2e-5, # <--- 关键：匹配论文 
         max_grad_norm=1.0,  # <--- 关键：添加梯度裁剪 (Gradient Clipping)
         fp16=True,
-        label_smoothing_factor=0.1,
     )
     trainer = Trainer(
         model=model,
