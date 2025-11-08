@@ -37,7 +37,7 @@ class AmpleHateModel(BertPreTrainedModel):
         self.num_labels = config.num_labels
         self.config = config
 
-        self.encoder = BertModel(config, add_pooling_layer=False) 
+        self.bert = BertModel(config, add_pooling_layer=False) 
 
         self.lambda_val = lambda_val
         self.relation_attention = nn.MultiheadAttention(
@@ -61,7 +61,7 @@ class AmpleHateModel(BertPreTrainedModel):
         labels: torch.LongTensor = None,
         **kwargs,
     ):
-        encoder_outputs = self.encoder(
+        encoder_outputs = self.bert(
             input_ids=input_ids,
             attention_mask=attention_mask,
         )
@@ -138,7 +138,7 @@ class AmpleHateModel(BertPreTrainedModel):
         loss = None
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss(weight=self.class_weights_buffer, label_smoothing=0.1)
-            loss = loss_fct(logits.view(-_n, self.num_labels), labels.view(-1))
+            loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
         return SequenceClassifierOutput(
             loss=loss,
