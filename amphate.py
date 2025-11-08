@@ -95,7 +95,7 @@ class AmpleHateModel(BertPreTrainedModel):
             r_exp_filtered, _ = self.relation_attention(
                 query=h0_q_filtered,
                 key=hidden_states_filtered,
-                value=h0_q_filtered,
+                value=hidden_states_filtered,
                 key_padding_mask=exp_key_padding_mask_filtered
             )
             r_exp.index_copy_(0, indices, r_exp_filtered)
