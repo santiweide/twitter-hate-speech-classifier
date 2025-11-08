@@ -315,7 +315,7 @@ def main():
         learning_rate=2e-5, # <--- 关键：匹配论文 
         max_grad_norm=1.0,  # <--- 关键：添加梯度裁剪 (Gradient Clipping)
         fp16=True,
-        label_smoothing_factor=0.1
+        label_smoothing_factor=0.1,
         evaluation_strategy="steps",     # Evaluate at the same frequency as logging
         eval_steps=100,                  # Evaluate every 100 steps
         save_strategy="steps",           # Save checkpoint at the same frequency
