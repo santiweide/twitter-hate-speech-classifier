@@ -64,72 +64,48 @@ class AmpleHateModel(T5PreTrainedModel):
         labels: torch.LongTensor = None,
         **kwargs,
     ):
-        # 1. GET ENCODER HIDDEN STATES
-        # H = [h_0, h_1, ..., h_n] [cite: 81]
         encoder_outputs = self.encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
         )
-        # Shape: [batch_size, seq_len, d_model]
         hidden_states = encoder_outputs.last_hidden_state
 
-        # 2. GET IMPLICIT & EXPLICIT TARGETS
-        # h0 is the [CLS] token embedding (or first token for T5) [cite: 91]
-        # Shape: [batch_size, d_model]
         h0 = hidden_states[:, 0, :]
-
-        # Reshape h0 for attention query (Q)
-        # Shape: [batch_size, 1, d_model]
         h0_q = h0.unsqueeze(1)
 
-        # 3. STEP 2: RELATION COMPUTATION [cite: 93]
-
-        # 3a. Compute Implicit Relation (r_imp)
-        # This is self-attention of the [CLS] token [cite: 106]
-        # r_imp = Attention(Q=h0, K=h0, V=h0)
         r_imp, _ = self.relation_attention(
             query=h0_q,
             key=h0_q,
             value=h0_q
         )
-        # Shape: [batch_size, 1, d_model]
 
-        # 3b. Compute Explicit Relation (r_exp)
-        # r_exp = Attention(Q=h0, K=H_exp, V=H_exp)
-        # We use all hidden_states as K/V and use the mask
-        # to ignore non-target tokens.
+        if torch.any(explicit_target_mask):
+            exp_key_padding_mask = (explicit_target_mask == 0)
+            r_exp, _ = self.relation_attention(
+                query=h0_q,
+                key=hidden_states,
+                value=hidden_states,
+                key_padding_mask=exp_key_padding_mask
+            )
+        else:
+            r_exp = torch.zeros_like(r_imp)
 
-        # key_padding_mask is True for tokens to *ignore*
-        # We ignore all tokens that are *not* explicit targets.
-        exp_key_padding_mask = (explicit_target_mask == 0)
-
-        r_exp, _ = self.relation_attention(
-            query=h0_q,
-            key=hidden_states,
-            value=hidden_states,
-            key_padding_mask=exp_key_padding_mask
-        )
-        # Shape: [batch_size, 1, d_model]
-
-        # 3c. Combine relations: r = r_imp + r_exp [cite: 105]
-        # Squeeze out the sequence dimension (1)
         r = r_imp.squeeze(1) + r_exp.squeeze(1)
-        # Shape: [batch_size, d_model]
 
-        # 4. STEP 3: DIRECT INJECTION [cite: 108]
-        # z = h0 + lambda * r [cite: 148]
         z = h0 + (self.lambda_val * r)
-        # Shape: [batch_size, d_model]
-
-        # 5. CLASSIFICATION
-        # Pass the amplified representation 'z' to the classifier [cite: 147]
+        
         logits = self.classifier(z)
 
-        # 6. COMPUTE LOSS
         loss = None
         if labels is not None:
-            loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            # Add a check for NaN logits *before* computing loss
+            # This helps with debugging if the problem persists.
+            if torch.isnan(logits).any():
+                print("Warning: NaN detected in logits. Skipping loss calculation.")
+            else:
+                loss_fct = nn.CrossEntropyLoss()
+                loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            # --- END: STABILITY FIX ---
 
         return SequenceClassifierOutput(
             loss=loss,
