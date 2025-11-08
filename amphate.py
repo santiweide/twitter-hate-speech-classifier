@@ -46,6 +46,7 @@ class AmpleHateModel(BertPreTrainedModel):
             batch_first=True
         )
         self.layer_norm = nn.LayerNorm(config.hidden_size)
+        self.relation_norm = nn.LayerNorm(config.hidden_size)
         self.classifier = nn.Linear(config.hidden_size, self.num_labels)
         if class_weights is not None:
             self.register_buffer('class_weights_buffer', class_weights)
@@ -101,10 +102,13 @@ class AmpleHateModel(BertPreTrainedModel):
                 key_padding_mask=final_key_padding_mask 
             )
             r_exp.index_copy_(0, indices, r_exp_filtered.to(r_exp.dtype))
-
+        
+        r_unnormalized = h0_q.squeeze(1) + r_exp.squeeze(1)
+        r_normalized = self.relation_norm(r_unnormalized)
+    
         # 4. GET FINAL RELATION VECTOR
         # r is now *only* the explicit relation (or zeros if none)
-        r = r_exp.squeeze(1)
+        r = r_normalized.squeeze(1)
 
         # 5. DIRECT INJECTION (h0 + lambda * r_exp)
         # z = h0 + (self.lambda_val * r) <-- [OLD]
@@ -292,7 +296,7 @@ def main():
     model = AmpleHateModel.from_pretrained(
         BASE_MODEL_NAME,
         config=config,
-        lambda_val=0.1,
+        lambda_val=0.05,
         class_weights=class_weights,
     )
     data_collator = DataCollatorWithPadding(tokenizer=base_tokenizer)
