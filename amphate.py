@@ -129,7 +129,7 @@ class AmpleHateModel(BertPreTrainedModel):
         # 9. COMPUTE LOSS (was 8)
         loss = None
         if labels is not None:
-            loss_fct = nn.CrossEntropyLoss(weight=self.class_weights, label_smoothing=0.1)
+            loss_fct = nn.CrossEntropyLoss(weight=self.class_weights_buffer, label_smoothing=0.1)
             loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
 
         return SequenceClassifierOutput(
@@ -279,8 +279,8 @@ def main():
     class_weights = torch.tensor(weights.values, dtype=torch.float32)
     
     # Move weights to the same device as the model
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    class_weights = class_weights.to(device)
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    # class_weights = class_weights.to(device)
     
     print(f"Class Weights: {class_weights}") # You will see the 'hate' class has a much higher weight
 
