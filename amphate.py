@@ -45,6 +45,7 @@ class AmpleHateModel(BertPreTrainedModel):
             num_heads=1,
             batch_first=True
         )
+        self.layer_norm = nn.LayerNorm(config.hidden_size)
         self.classifier = nn.Linear(config.hidden_size, self.num_labels) # <--- (可选) 
 
         # Initialize weights
@@ -105,7 +106,7 @@ class AmpleHateModel(BertPreTrainedModel):
 
         # 6. DIRECT INJECTION [cite: 108, 148]
         z = h0 + (self.lambda_val * r)
-        
+        z = self.layer_norm(z)
         # 7. CLASSIFICATION
         logits = self.classifier(z)
 
