@@ -96,9 +96,9 @@ class WeightedTrainer(Trainer):
 
 training_args = TrainingArguments(
     output_dir="./roberta_results",
-    num_train_epochs=3, 
-    per_device_train_batch_size=4,
-    per_device_eval_batch_size=4,
+    num_train_epochs=1, 
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
     logging_dir='./logs',
     logging_steps=50, 
     eval_strategy="epoch",
