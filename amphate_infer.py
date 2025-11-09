@@ -126,11 +126,9 @@ def slice_metrics(df, slice_col):
             "n": n, "acc": acc, "FPR": fpr_slice, "FNR": fnr_slice
         })
 
-    # --- [FIX 2] ---
     # 修复 DeprecationWarning
     # 按切片列分组并应用指标函数
     grouped = df.groupby(slice_col).apply(get_metrics, include_groups=False)
-    # --- [END FIX 2] ---
     
     return grouped.reset_index()
 
@@ -328,18 +326,17 @@ def run_inference_and_analysis():
     # 使用从 amphate_model 导入的 TARGET_NER_LABELS
     for ent in sorted(TARGET_NER_LABELS):
         
-        # --- [FIX 1] ---
+        # --- [FIX] ---
         # 修复 ValueError: The truth value of an array ... is ambiguous.
-        # 原因: (lst or []) 无法处理 NumPy 数组。
-        # 修复: 
-        # 1. 用 (lst if pd.notna(lst) and hasattr(lst, '__iter__') else []) 
-        #    替换 (lst or [])，以安全地处理 list, np.array, None, 和 np.nan。
-        # 2. 修复了 lambda 内部的 typo，isinstance(lst, list) -> isinstance(e, dict)
+        # 原因: `pd.notna(lst)` 当 lst 是一个数组时，会返回一个布尔数组。
+        #      `if` 语句无法处理布尔数组。
+        # 修复: 使用 `not pd.isna(lst)`，它会正确地检查 `lst` 容器本身是否为 null，
+        #      并始终返回一个单独的布尔值。
         mask = test_df["ner_results"].map(
             lambda lst: any(isinstance(e, dict) and e.get("entity_group") == ent 
-                            for e in (lst if pd.notna(lst) and hasattr(lst, '__iter__') else []))
+                            for e in (lst if not pd.isna(lst) and hasattr(lst, '__iter__') else []))
         )
-        # --- [END FIX 1] ---
+        # --- [END FIX] ---
         
         # 将掩码应用于 df_analysis
         sub = df_analysis[mask]
