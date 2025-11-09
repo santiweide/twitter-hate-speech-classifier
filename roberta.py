@@ -12,6 +12,13 @@ import urllib.request
 import csv
 import kagglehub 
 import sys 
+from sklearn.metrics import accuracy_score, f1_score, recall_score # NEW: Import metrics
+from transformers import set_seed
+from my_metrics import compute_metrics
+
+TRAINING_SEED = 42
+set_seed(TRAINING_SEED)
+
 
 def preprocess(text):
     new_text = []
@@ -35,7 +42,7 @@ data_file_path = Path(path) / "train_E6oV3lV.csv"
 
 if not data_file_path.exists():
     print(f"Error: Could not find 'train_E6oV3lV.csv' in {path}")
-    sys.exit(1) # 停止脚本
+    sys.exit(1)
 
 print(f"Loading data from {data_file_path}...")
 df = pd.read_csv(data_file_path)
@@ -95,10 +102,12 @@ training_args = TrainingArguments(
     per_device_eval_batch_size=4,
     logging_dir='./logs',
     logging_steps=50, 
-    eval_strategy="epoch", 
+    eval_strategy="epoch",
     save_strategy="epoch",
     load_best_model_at_end=True,
     remove_unused_columns=False, 
+    metric_for_best_model="f1",
+    seed=TRAINING_SEED,
 )
 
 trainer = WeightedTrainer(
@@ -106,7 +115,8 @@ trainer = WeightedTrainer(
     args=training_args,
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
-    class_weights=class_weights
+    class_weights=class_weights,
+    compute_metrics=compute_metrics 
 )
 
 print("Starting training...")

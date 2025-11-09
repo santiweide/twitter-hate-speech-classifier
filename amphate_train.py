@@ -20,6 +20,7 @@ import kagglehub
 import pandas as pd
 from pathlib import Path
 from transformers import set_seed
+from my_metrics import compute_metrics
 
 from amphate_model import AmpleHateModel, create_preprocessing_function, TARGET_NER_LABELS
 
@@ -31,22 +32,6 @@ set_seed(TRAINING_SEED)
 # F1 (Macro): 0.8664
 # Recall (Macro): 0.8760
 # --------------------------
-
-def compute_metrics(p):
-    """Compute F1, Accuracy, and Recall."""
-    preds = np.argmax(p.predictions, axis=1)
-    labels = p.label_ids
-
-    f1 = f1_score(labels, preds, average='macro')
-    acc = accuracy_score(labels, preds)
-    recall = recall_score(labels, preds, average='macro')
-
-    return {
-        "accuracy": acc,
-        "f1": f1,
-        "recall": recall,
-    }
-
 def main():
     print("Setting up models and tokenizers...")
 
