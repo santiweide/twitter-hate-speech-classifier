@@ -216,7 +216,11 @@ split_dataset = tokenized_dataset.train_test_split(test_size=0.2, seed=TRAINING_
 eval_dataset = split_dataset['test']
 
 # Get raw text for robustness tests *before* it's removed
-raw_eval_df = dataset.select(split_dataset['test']._indices).to_pandas()
+# --- THIS IS THE CORRECTED PART ---
+test_indices = split_dataset['test']._indices.to_pylist()
+raw_eval_df = dataset.select(test_indices).to_pandas()
+# --- END OF FIX ---
+
 raw_eval_texts = list(raw_eval_df['text'])
 raw_eval_labels = list(raw_eval_df['label'])
 
