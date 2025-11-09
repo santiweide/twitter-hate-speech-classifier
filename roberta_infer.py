@@ -89,6 +89,10 @@ def run_evaluation(dataset, model, data_collator, device):
     """
     NEW: Reusable function to run inference on any given dataset.
     """
+    # --- FIX: Set format *only* for this run and save original ---
+    original_format = dataset.format
+    dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'labels'])
+    
     eval_dataloader = DataLoader(
         dataset,
         batch_size=16, 
@@ -96,13 +100,15 @@ def run_evaluation(dataset, model, data_collator, device):
     )
     
     all_logits = []
+    all_labels = [] # <-- NEW: Get labels from the batch
+    
     model.eval() # Ensure model is in eval mode
     with torch.no_grad():
         for batch in tqdm(eval_dataloader, desc="Running evaluation"):
-            # Ensure only model inputs are passed
+            all_labels.append(batch['labels'].cpu()) # <-- Store labels
             model_inputs = {
                 k: v.to(device) for k, v in batch.items() 
-                if k in ["input_ids", "attention_mask"]
+                if k in ["input_ids", "attention_mask"] 
             }
             if not model_inputs:
                 print("Warning: Batch contains no model inputs.")
@@ -114,18 +120,16 @@ def run_evaluation(dataset, model, data_collator, device):
     
     if not all_logits:
         print("Error: No logits were generated. Check dataset and inputs.")
+        dataset.set_format(**original_format) # <-- Reset format
         return None, None
 
     final_logits = torch.cat(all_logits, dim=0)
+    y_true = np.array(torch.cat(all_labels, dim=0)) # <-- Use stored labels
     
-    # Get true labels from the dataset
-    try:
-        y_true = np.array(dataset['labels'])
-    except KeyError:
-        print("Error: 'labels' column not found in dataset.")
-        return None, None
-
     probabilities = softmax(final_logits.numpy(), axis=1)
+    
+    # --- FIX: Reset format to what it was before ---
+    dataset.set_format(**original_format)
     return y_true, probabilities
 
 def compute_and_print_metrics(y_true, probabilities, dataset_name):
@@ -184,7 +188,7 @@ MODEL = "cardiffnlp/twitter-roberta-base-hate" # Base model for tokenizer
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL)
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-model = AutoModelForSequenceClassification.from_pretrained(CHECKPOINT_PATH, num_labels=2)
+model = AutoModelForClassification.from_pretrained(CHECKPOINT_PATH, num_labels=2)
 tokenize_function = create_tokenizer_function(tokenizer)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -209,21 +213,17 @@ df = df.dropna(subset=['text'])
 dataset = Dataset.from_pandas(df)
 
 print("Tokenizing baseline dataset...")
-tokenized_dataset = dataset.map(tokenize_function, batched=True, remove_columns=["text"])
+# --- FIX: Do NOT remove the 'text' column here ---
+tokenized_dataset = dataset.map(tokenize_function, batched=True) 
 tokenized_dataset = tokenized_dataset.rename_column("label", "labels")
-# We keep the raw text in a separate object for the robustness tests
+
 split_dataset = tokenized_dataset.train_test_split(test_size=0.2, seed=TRAINING_SEED)
-eval_dataset = split_dataset['test']
+eval_dataset = split_dataset['test'] # <-- This dataset NOW contains the 'text' column
 
-# Get raw text for robustness tests *before* it's removed
-# --- THIS IS THE CORRECTED PART ---
-test_indices = split_dataset['test']._indices.to_pylist()
-raw_eval_df = dataset.select(test_indices).to_pandas()
-# --- END OF FIX ---
-
-raw_eval_texts = list(raw_eval_df['text'])
-raw_eval_labels = list(raw_eval_df['label'])
-
+# --- FIX: Get text directly from eval_dataset. Delete failing index code. ---
+raw_eval_texts = eval_dataset['text']
+# The redundant raw_eval_labels line is also removed.
+# ------------------ END OF FIX ------------------
 
 print(f"Baseline Eval dataset size: {len(eval_dataset)}")
 
