@@ -126,7 +126,11 @@ def slice_metrics(df, slice_col):
             "n": n, "acc": acc, "FPR": fpr_slice, "FNR": fnr_slice
         })
 
+    # --- [FIX 2] ---
+    # 修复 DeprecationWarning
+    # 按切片列分组并应用指标函数
     grouped = df.groupby(slice_col).apply(get_metrics, include_groups=False)
+    # --- [END FIX 2] ---
     
     return grouped.reset_index()
 
@@ -193,6 +197,7 @@ def run_inference_and_analysis():
     tokenized_test_dataset = test_dataset_raw.map(preprocess_fn, batched=True)
     
     true_labels = tokenized_test_dataset["labels"] 
+    # 转换为 NumPy 数组，以便 ECE 函数使用
     y_true = np.array(true_labels) 
     
     tokenized_test_dataset = tokenized_test_dataset.remove_columns(["text", "label", "ner_results"])
@@ -220,30 +225,38 @@ def run_inference_and_analysis():
     final_logits = torch.cat(all_logits, dim=0)
     print("Inference complete.")
 
+    # --- 4. Error Analysis ---
     print("\n--- Error Analysis Results ---")
 
+    # --- 4.1. 基础 DataFrame 设置 ---
+    # 1. 计算概率 (Probabilities) 和置信度 (Confidences)
     probabilities = torch.softmax(final_logits, dim=1)
     max_probs_tensor, pred_labels_tensor = torch.max(probabilities, axis=1)
     
+    # 转换为 NumPy 数组
     pred_labels = pred_labels_tensor.numpy()
     max_probs = max_probs_tensor.numpy()
     y_prob = probabilities.numpy() # (N_samples, N_classes) 
 
     original_texts = test_dataset_raw["text"]
     
+    # 2. 将置信度添加到分析 DataFrame 中
     df_analysis = pd.DataFrame({
         "text": original_texts,
-        "true_label": y_true,
+        "true_label": y_true,       # 使用 np 数组
         "predicted_label": pred_labels,
-        "confidence": max_probs 
+        "confidence": max_probs   # 添加置信度列
     })
     
+    # 保存完整的测试集预测结果，以便将来分析
     full_analysis_file = analysis_dir / "full_test_predictions.csv"
     df_analysis.to_csv(full_analysis_file, index=False)
     print(f"\nFull prediction results (with confidence) saved to: {full_analysis_file}")
     
+    # 筛选出错误样本
     df_errors = df_analysis[df_analysis["predicted_label"] != df_analysis["true_label"]].copy()
 
+    # 按置信度降序排列错误 —— 优先查看模型“非常自信但错了”的样本
     df_errors_sorted = df_errors.sort_values(by="confidence", ascending=False)
 
     total_samples = len(df_analysis)
@@ -254,12 +267,14 @@ def run_inference_and_analysis():
     print(f"Prediction errors: {total_errors}")
     print(f"Test Set Accuracy: {accuracy * 100 :.2f}%")
 
+    # --- 4.2. 校准分析 (Calibration Analysis) ---
     print("\n--- Calibration Analysis (Reliability) ---")
     n_bins = 15
     ece, (bins, bacc, bconf, bsize) = expected_calibration_error(y_prob, y_true, n_bins=n_bins)
     print(f"ECE (Expected Calibration Error) @ {n_bins} bins: {ece:.4f} (lower is better)")
 
-    fig = plt.figure(figsize=(8, 6))
+    # 开始绘图
+    fig = plt.figure(figsize=(8, 6)) # 设置图像大小
     plt.plot([0,1],[0,1], linestyle="--", color="gray", label="Perfect Calibration")
     centers = (bins[:-1] + bins[1:]) / 2
     mask = ~np.isnan(bacc)
@@ -281,13 +296,24 @@ def run_inference_and_analysis():
     fig.savefig(plot_file, dpi=180)
     print(f"Reliability diagram saved to: {plot_file}")
     
+    
+    # --- 4.3. 切片分析 (Slice-based Analysis) ---
     print("\n--- Slice-based Analysis (NER) ---")
     
+    # 我们需要原始的 test_dataset_raw 来访问 'ner_results'
+    # 将其转换为 pandas DF
     test_df = test_dataset_raw.to_pandas()
     
+    # 为 df_analysis 添加 'correct' 列，以便 slice_metrics 函数使用
     df_analysis["correct"] = (df_analysis["true_label"] == df_analysis["predicted_label"])
+    
+    # --- 4.3a. 'has_target_entity' 切片 ---
+    
+    # 从 test_df (包含 ner_results) 重建 'has_target_entity' 标志
+    # df_analysis 和 test_df 的顺序是一致的
     df_analysis["has_target_entity"] = test_df["ner_results"].map(has_target_entity).astype(int)
     
+    # 调用 slice_metrics 辅助函数
     target_slice_metrics = slice_metrics(df_analysis, "has_target_entity")
     target_slice_file = analysis_dir / "slice_has_target_entity.csv"
     target_slice_metrics.to_csv(target_slice_file, index=False)
@@ -299,19 +325,32 @@ def run_inference_and_analysis():
     # --- 4.3b. 'per_entity_type' 切片 ---
     
     rows = []
+    # 使用从 amphate_model 导入的 TARGET_NER_LABELS
     for ent in sorted(TARGET_NER_LABELS):
         
+        # --- [FIX 1] ---
+        # 修复 ValueError: The truth value of an array ... is ambiguous.
+        # 原因: (lst or []) 无法处理 NumPy 数组。
+        # 修复: 
+        # 1. 用 (lst if pd.notna(lst) and hasattr(lst, '__iter__') else []) 
+        #    替换 (lst or [])，以安全地处理 list, np.array, None, 和 np.nan。
+        # 2. 修复了 lambda 内部的 typo，isinstance(lst, list) -> isinstance(e, dict)
         mask = test_df["ner_results"].map(
             lambda lst: any(isinstance(e, dict) and e.get("entity_group") == ent 
                             for e in (lst if pd.notna(lst) and hasattr(lst, '__iter__') else []))
         )
+        # --- [END FIX 1] ---
+        
+        # 将掩码应用于 df_analysis
         sub = df_analysis[mask]
         
         if len(sub) > 0:
+            # 计算指标
             rows.append({
                 "entity_type": ent,
                 "n": len(sub),
                 "acc": sub["correct"].mean(),
+                # 使用 df_analysis 的列名
                 "FPR": ((sub["true_label"] == 0) & (sub["predicted_label"] == 1)).sum() / len(sub),
                 "FNR": ((sub["true_label"] == 1) & (sub["predicted_label"] == 0)).sum() / len(sub),
             })
@@ -332,8 +371,10 @@ def run_inference_and_analysis():
         pd.set_option('display.max_colwidth', None)
         pd.set_option('display.max_rows', 100)
         
+        # 打印按置信度排序的错误
         print(df_errors_sorted.head(20).to_string(index=False)) 
         
+        # 保存排序后的错误文件
         error_file = analysis_dir / "error_analysis_sorted.csv"
         df_errors_sorted.to_csv(error_file, index=False)
         print(f"\nError samples (sorted by confidence) saved to: {error_file}")
