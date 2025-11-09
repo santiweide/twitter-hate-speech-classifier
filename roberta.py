@@ -28,8 +28,7 @@ def preprocess(text):
         new_text.append(t)
     return " ".join(new_text)
 
-task = 'hate'
-MODEL = f"cardiffnlp/twitter-roberta-base-{task}"
+MODEL = f"cardiffnlp/twitter-roberta-base-hate"
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL)
 model = AutoModelForSequenceClassification.from_pretrained(MODEL, num_labels=2)
