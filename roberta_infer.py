@@ -87,7 +87,7 @@ print(f"Eval dataset size: {len(eval_dataset)}")
 
 test_dataloader = DataLoader(
     eval_dataset,
-    batch_size=16, # You can adjust batch size
+    batch_size=16, 
     collate_fn=data_collator
 )
 
@@ -100,7 +100,6 @@ all_logits = []
 
 with torch.no_grad(): # Disable gradient calculation
     for batch in tqdm(test_dataloader, desc="Inference"):
-        # Move batch to device
         batch = {k: v.to(device) for k, v in batch.items() if k in ["input_ids", "attention_mask"]}
         
         outputs = model(**batch)
@@ -113,21 +112,16 @@ print("Inference complete.")
 
 print("\n--- Starting Error Analysis ---")
 
-# --- FIX: Use results from the manual loop, not trainer ---
 print("Processing results from manual inference...")
 logits = final_logits.numpy()
 y_true = np.array(eval_dataset['labels']) # Get true labels from the dataset
-# --- (End Fix) ---
 
-# 2. Get Probabilities, Predicted Labels, and Confidences
 probabilities = softmax(logits, axis=1)
 y_pred = np.argmax(probabilities, axis=1)
 confidences = np.max(probabilities, axis=1) # Confidence is the max probability
 
-# 3. Full Prediction Results (with Confidence)
 print("\n--- Full Prediction Results ---")
 
-# --- FIX: Get original texts from the eval_dataset directly ---
 original_texts = eval_dataset['text']
 
 df_analysis = pd.DataFrame({
@@ -139,12 +133,10 @@ df_analysis = pd.DataFrame({
     "prob_1 (hate)": probabilities[:, 1],
 })
 
-# --- FIX: Use the defined OUTPUT_DIR ---
 analysis_file = OUTPUT_DIR / "full_evaluation_predictions.csv"
 df_analysis.to_csv(analysis_file, index=False)
 print(f"Full prediction results saved to: {analysis_file}")
 
-# Show most confident errors
 df_errors = df_analysis[df_analysis["true_label"] != df_analysis["predicted_label"]]
 df_errors_sorted = df_errors.sort_values(by="confidence", ascending=False)
 
@@ -152,7 +144,6 @@ print("\n--- Top 10 Most Confident Errors ---")
 pd.set_option('display.max_colwidth', 200) # To see the full text
 print(df_errors_sorted.head(10).to_string(index=False))
 
-# 4. Calibration Analysis (Reliability)
 print("\n--- Calibration Analysis (Reliability) ---")
 n_bins = 10
 ece, bin_accs, bin_confs, bin_counts, bin_lowers = expected_calibration_error(
@@ -161,19 +152,15 @@ ece, bin_accs, bin_confs, bin_counts, bin_lowers = expected_calibration_error(
 
 print(f"Expected Calibration Error (ECE) @ {n_bins} bins: {ece:.4f}")
 
-# Plot Reliability Diagram
 plt.figure(figsize=(8, 7))
 plt.plot([0, 1], [0, 1], linestyle="--", color="gray", label="Perfect Calibration")
 
-# Calculate bin centers for plotting
 bin_width = 1.0 / n_bins
 bin_centers = bin_lowers + (bin_width / 2.0)
 
-# Plot bars for accuracy
 plt.bar(bin_centers, bin_accs, width=bin_width, edgecolor="black", 
         alpha=0.7, label="Bin Accuracy")
 
-# Plot line for confidence
 plt.plot(bin_centers, bin_confs, "o-", color="red", 
          label="Bin Avg. Confidence")
 
@@ -185,7 +172,6 @@ plt.grid(alpha=0.4)
 plt.xlim(0, 1)
 plt.ylim(0, 1)
 
-# --- FIX: Use the defined OUTPUT_DIR ---
 plot_file = OUTPUT_DIR / "reliability_diagram.png"
 plt.savefig(plot_file)
 print(f"Reliability diagram saved to: {plot_file}")
