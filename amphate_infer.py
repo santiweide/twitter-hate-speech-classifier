@@ -14,8 +14,6 @@ from datasets import Dataset
 import kagglehub
 from tqdm import tqdm
 
-# --- [NEW] --- 
-# 添加 Matplotlib 和辅助函数所需的导入
 import matplotlib.pyplot as plt
 
 # 假设 'amphate_model' 脚本在同一目录下
@@ -24,11 +22,9 @@ from amphate_model import AmpleHateModel, create_preprocessing_function, TARGET_
 TRAINING_SEED = 42
 set_seed(TRAINING_SEED)
 
-# --- [NEW] --- 
-# 
+# ---
 # 辅助函数区域
-#
-# --- [END NEW] ---
+# ---
 
 def expected_calibration_error(probs, labels, n_bins=10):
     """
@@ -89,7 +85,7 @@ def expected_calibration_error(probs, labels, n_bins=10):
             
     return ece, (bins, np.array(bin_accs), np.array(bin_confs), np.array(bin_sizes))
 
-# --- [NEW] --- 
+
 #
 # 切片分析 (Slice Analysis) 辅助函数
 #
@@ -121,7 +117,6 @@ def slice_metrics(df, slice_col):
         acc = sub_df["correct"].mean()
         
         # FPR (False Positive Rate) - 在此切片中，(真=0, 预=1) 的比例
-        # 这不是传统定义 (FP / N)，而是 (FP / N_slice)
         fpr_slice = ((sub_df["true_label"] == 0) & (sub_df["predicted_label"] == 1)).sum() / n
         
         # FNR (False Negative Rate) - 在此切片中，(真=1, 预=0) 的比例
@@ -131,10 +126,9 @@ def slice_metrics(df, slice_col):
             "n": n, "acc": acc, "FPR": fpr_slice, "FNR": fnr_slice
         })
 
-    # 按切片列分组并应用指标函数
-    grouped = df.groupby(slice_col).apply(get_metrics)
+    grouped = df.groupby(slice_col).apply(get_metrics, include_groups=False)
+    
     return grouped.reset_index()
-# --- [END NEW] ---
 
 
 def run_inference_and_analysis():
@@ -143,12 +137,10 @@ def run_inference_and_analysis():
     BASE_MODEL_NAME = "bert-base-cased"
     NER_MODEL_NAME = "dslim/bert-base-NER"
 
-    # --- [NEW] --- 
     # 创建一个目录来存放所有的分析结果
     analysis_dir = Path("error_analysis")
     analysis_dir.mkdir(parents=True, exist_ok=True)
     print(f"Analysis artifacts will be saved to: {analysis_dir.resolve()}")
-    # --- [END NEW] ---
 
     print(f"Loading checkpoint from: {CHECKPOINT_PATH}")
     print(f"Using Tokenizer: {BASE_MODEL_NAME}")
@@ -173,13 +165,12 @@ def run_inference_and_analysis():
     )
 
     path = kagglehub.dataset_download("vkrahul/twitter-hate-speech")
-    data_file_path = Path(path) / "train_E6oV3LgV.csv"
-    
+    # 尝试两个常见的文件名
+    data_file_path = Path(path) / "train_E6oV3lV.csv"
     if not data_file_path.exists():
-        # 修正了原始代码中的拼写错误 (V3lV -> V3LgV)
-        data_file_path = Path(path) / "train_E6oV3lV.csv"
+        data_file_path = Path(path) / "train_E6oV3LgV.csv"
         if not data_file_path.exists():
-            print(f"Error: Could not find 'train_E6oV3lV.csv' in {path}")
+            print(f"Error: Could not find 'train_E6oV3lV.csv' or 'train_E6oV3LgV.csv' in {path}")
             return
             
     df = pd.read_csv(data_file_path)
@@ -202,10 +193,7 @@ def run_inference_and_analysis():
     tokenized_test_dataset = test_dataset_raw.map(preprocess_fn, batched=True)
     
     true_labels = tokenized_test_dataset["labels"] 
-    # --- [NEW] --- 
-    # 转换为 NumPy 数组，以便 ECE 函数使用
     y_true = np.array(true_labels) 
-    # --- [END NEW] ---
     
     tokenized_test_dataset = tokenized_test_dataset.remove_columns(["text", "label", "ner_results"])
     tokenized_test_dataset.set_format("torch")
@@ -232,38 +220,30 @@ def run_inference_and_analysis():
     final_logits = torch.cat(all_logits, dim=0)
     print("Inference complete.")
 
-    # --- 4. Error Analysis ---
     print("\n--- Error Analysis Results ---")
 
-    # --- 4.1. 基础 DataFrame 设置 ---
-    # 1. 计算概率 (Probabilities) 和置信度 (Confidences)
     probabilities = torch.softmax(final_logits, dim=1)
     max_probs_tensor, pred_labels_tensor = torch.max(probabilities, axis=1)
     
-    # 转换为 NumPy 数组
     pred_labels = pred_labels_tensor.numpy()
     max_probs = max_probs_tensor.numpy()
     y_prob = probabilities.numpy() # (N_samples, N_classes) 
 
     original_texts = test_dataset_raw["text"]
     
-    # 2. 将置信度添加到分析 DataFrame 中
     df_analysis = pd.DataFrame({
         "text": original_texts,
-        "true_label": y_true,       # 使用 np 数组
+        "true_label": y_true,
         "predicted_label": pred_labels,
-        "confidence": max_probs   # 添加置信度列
+        "confidence": max_probs 
     })
     
-    # 保存完整的测试集预测结果，以便将来分析
     full_analysis_file = analysis_dir / "full_test_predictions.csv"
     df_analysis.to_csv(full_analysis_file, index=False)
     print(f"\nFull prediction results (with confidence) saved to: {full_analysis_file}")
     
-    # 筛选出错误样本
     df_errors = df_analysis[df_analysis["predicted_label"] != df_analysis["true_label"]].copy()
 
-    # 按置信度降序排列错误 —— 优先查看模型“非常自信但错了”的样本
     df_errors_sorted = df_errors.sort_values(by="confidence", ascending=False)
 
     total_samples = len(df_analysis)
@@ -274,14 +254,12 @@ def run_inference_and_analysis():
     print(f"Prediction errors: {total_errors}")
     print(f"Test Set Accuracy: {accuracy * 100 :.2f}%")
 
-    # --- 4.2. 校准分析 (Calibration Analysis) ---
     print("\n--- Calibration Analysis (Reliability) ---")
     n_bins = 15
     ece, (bins, bacc, bconf, bsize) = expected_calibration_error(y_prob, y_true, n_bins=n_bins)
     print(f"ECE (Expected Calibration Error) @ {n_bins} bins: {ece:.4f} (lower is better)")
 
-    # 开始绘图
-    fig = plt.figure(figsize=(8, 6)) # 设置图像大小
+    fig = plt.figure(figsize=(8, 6))
     plt.plot([0,1],[0,1], linestyle="--", color="gray", label="Perfect Calibration")
     centers = (bins[:-1] + bins[1:]) / 2
     mask = ~np.isnan(bacc)
@@ -303,25 +281,13 @@ def run_inference_and_analysis():
     fig.savefig(plot_file, dpi=180)
     print(f"Reliability diagram saved to: {plot_file}")
     
-    
-    # --- [NEW] ---
-    # --- 4.3. 切片分析 (Slice-based Analysis) ---
     print("\n--- Slice-based Analysis (NER) ---")
     
-    # 我们需要原始的 test_dataset_raw 来访问 'ner_results'
-    # 将其转换为 pandas DF
     test_df = test_dataset_raw.to_pandas()
     
-    # 为 df_analysis 添加 'correct' 列，以便 slice_metrics 函数使用
     df_analysis["correct"] = (df_analysis["true_label"] == df_analysis["predicted_label"])
-    
-    # --- 4.3a. 'has_target_entity' 切片 ---
-    
-    # 从 test_df (包含 ner_results) 重建 'has_target_entity' 标志
-    # df_analysis 和 test_df 的顺序是一致的
     df_analysis["has_target_entity"] = test_df["ner_results"].map(has_target_entity).astype(int)
     
-    # 调用 slice_metrics 辅助函数
     target_slice_metrics = slice_metrics(df_analysis, "has_target_entity")
     target_slice_file = analysis_dir / "slice_has_target_entity.csv"
     target_slice_metrics.to_csv(target_slice_file, index=False)
@@ -333,21 +299,19 @@ def run_inference_and_analysis():
     # --- 4.3b. 'per_entity_type' 切片 ---
     
     rows = []
-    # 使用从 amphate_model 导入的 TARGET_NER_LABELS
     for ent in sorted(TARGET_NER_LABELS):
-        # 创建掩码 (mask)，检查 test_df 中的 ner_results
-        mask = test_df["ner_results"].map(lambda lst: any((isinstance(lst, list) and e.get("entity_group")==ent) for e in (lst or [])))
         
-        # 将掩码应用于 df_analysis
+        mask = test_df["ner_results"].map(
+            lambda lst: any(isinstance(e, dict) and e.get("entity_group") == ent 
+                            for e in (lst if pd.notna(lst) and hasattr(lst, '__iter__') else []))
+        )
         sub = df_analysis[mask]
         
         if len(sub) > 0:
-            # 计算指标
             rows.append({
                 "entity_type": ent,
                 "n": len(sub),
                 "acc": sub["correct"].mean(),
-                # 使用 df_analysis 的列名
                 "FPR": ((sub["true_label"] == 0) & (sub["predicted_label"] == 1)).sum() / len(sub),
                 "FNR": ((sub["true_label"] == 1) & (sub["predicted_label"] == 0)).sum() / len(sub),
             })
@@ -361,19 +325,15 @@ def run_inference_and_analysis():
         print(per_ent_metrics.to_string(index=False))
     else:
         print("\nNo samples found for any target entity types.")
-    # --- [END NEW] ---
     
-
     # --- 4.4. 错误样本定性分析 (Qualitative Analysis) ---
     if total_errors > 0:
         print("\n--- Most Confident Error Samples ---")
         pd.set_option('display.max_colwidth', None)
         pd.set_option('display.max_rows', 100)
         
-        # 打印按置信度排序的错误
         print(df_errors_sorted.head(20).to_string(index=False)) 
         
-        # 保存排序后的错误文件
         error_file = analysis_dir / "error_analysis_sorted.csv"
         df_errors_sorted.to_csv(error_file, index=False)
         print(f"\nError samples (sorted by confidence) saved to: {error_file}")
