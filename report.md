@@ -4,18 +4,18 @@
 
 Automated hate speech detection is characterized by high subjectivity, complex context-dependency, and the pervasive use of implicit or coded language. It progressed from traditional machine learning classifiers trained on lexical features  to early deep learning models like LSTMs and GRUs. The advent of Transformer-based models, particularly BERT and its variants (e.g., RoBERTa, HateBERT), established a long-standing performance baseline. However, the current SOTA is characterized by two trends: (1) the application of Large Language Models (LLMs) like Llama 3 and GPT-4 , and (2) the development of highly specialized, fine-tuned embedding models. 
 
-Here two classifiers are implemented: NER+Bert and Roberta Embedding based model. There is a class imbalance in the training data so weighted class is applied to both fine-tuning process. NaN data is also filtered indicating there is no label or tweet.
+Here two classifiers are implemented: NER+Bert and Roberta Embedding based model. There is a class imbalance in the training data so weighted class is applied to both fine-tuning process. NaN data is also filtered indicating there is no tweet.
 
-
+Since only one dataset is provided, while evaluating the model performance, 90% of the data is used for finetuning and 10% is used for evaluating. The random seed is fixed so that the result can be replay-ed.
 
 ## Model 1: NER+Bert
 
-### Implement
+Here the data is fed into NER pipeline first, then a Bert model is used for classification.
 
 ### Effectiveness and Efficiency
 The model demonstrates exceptionally high overall accuracy (99.66%) on the test set of 3,197 samples, making only 11 incorrect predictions.
 
-For Efficiency, 
+For Efficiency, the NER preprocessing is optimized from sequencial to parallelf rolatency deduction.
 
 ### Error Analysis
 Here Expected Calibration Error(ECE) is used to see %TODO, and also Slice-based (NER) Analysis is used to see if NER is making sense.
@@ -36,4 +36,8 @@ This implies that all 11 prediction errors occurred on the 3,178 samples without
 
 
 
-## Model 2: 
+## Model 2: Roberta
+
+Sequence classification model `cardiffnlp/twitter-roberta-base-hate` is fine tuned on the twitter dataset here. 
+
+### Effectiveness and Efficiency

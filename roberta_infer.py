@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
-from transformers import Trainer, TrainingArguments
+# from transformers import Trainer, TrainingArguments # REMOVED
 from datasets import Dataset
 from pathlib import Path
 from scipy.special import softmax
@@ -12,9 +12,15 @@ import urllib.request
 import csv
 import kagglehub 
 import sys 
-from sklearn.metrics import accuracy_score, f1_score, recall_score # NEW: Import metrics
+from sklearn.metrics import accuracy_score, f1_score, recall_score 
 from transformers import set_seed
-from my_metrics import compute_metrics
+from my_metrics import compute_metrics, expected_calibration_error # NEW: Added expected_calibration_error
+
+# --- NEW: Added missing imports for manual inference and plotting ---
+from torch.utils.data import DataLoader
+from transformers import DataCollatorWithPadding
+from tqdm.auto import tqdm
+import matplotlib.pyplot as plt
 
 TRAINING_SEED = 42
 set_seed(TRAINING_SEED)
@@ -33,10 +39,17 @@ def preprocess(text):
         new_text.append(t)
     return " ".join(new_text)
 
+CHECKPOINT_PATH = "./roberta_results/checkpoint-9591"
+# --- NEW: Define a top-level output directory ---
+OUTPUT_DIR = Path("./roberta_results/")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True) # Ensure it exists
+
 MODEL = f"cardiffnlp/twitter-roberta-base-hate"
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL, num_labels=2)
+# --- NEW: Define the data collator for the DataLoader ---
+data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+model = AutoModelForSequenceClassification.from_pretrained(CHECKPOINT_PATH, num_labels=2)
 
 print("Downloading dataset from Kaggle Hub...")
 path = kagglehub.dataset_download("vkrahul/twitter-hate-speech")
@@ -55,17 +68,6 @@ df = df[['label', 'tweet']]
 df = df.rename(columns={"tweet": "text"})
 df = df.dropna(subset=['text'])
 
-print("Calculating class weights...")
-class_counts = df['label'].value_counts()
-num_samples = len(df)
-
-num_classes = len(class_counts)
-weights = num_samples / (num_classes * class_counts)
-
-weights = weights.sort_index()
-class_weights = torch.tensor(weights.values, dtype=torch.float32)
-print(f"Class Weights (for labels {weights.index.values}): {class_weights}")
-
 dataset = Dataset.from_pandas(df)
 
 def tokenize_function(examples):
@@ -78,73 +80,44 @@ tokenized_dataset = dataset.map(tokenize_function, batched=True)
 tokenized_dataset = tokenized_dataset.rename_column("label", "labels")
 tokenized_dataset.set_format("torch", columns=["input_ids", "attention_mask", "labels"])
 
-split_dataset = tokenized_dataset.train_test_split(test_size=0.2, seed=42)
-train_dataset = split_dataset['train']
+split_dataset = tokenized_dataset.train_test_split(test_size=0.2, seed=TRAINING_SEED)
 eval_dataset = split_dataset['test']
 
-print(f"Train dataset size: {len(train_dataset)}")
 print(f"Eval dataset size: {len(eval_dataset)}")
 
-class WeightedTrainer(Trainer):
-    def __init__(self, *args, class_weights=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.class_weights = class_weights
+test_dataloader = DataLoader(
+    eval_dataset,
+    batch_size=16, # You can adjust batch size
+    collate_fn=data_collator
+)
 
-    def compute_loss(self, model, inputs, return_outputs=False):
-        labels = inputs.pop("labels")
-        outputs = model(**inputs)
-        logits = outputs.get("logits")
-        loss_fct = nn.CrossEntropyLoss(weight=self.class_weights.to(model.device))
-        loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
+model.eval()
+print(f"Model loaded onto {device} and set to eval() mode.")
+
+all_logits = []
+
+with torch.no_grad(): # Disable gradient calculation
+    for batch in tqdm(test_dataloader, desc="Inference"):
+        # Move batch to device
+        batch = {k: v.to(device) for k, v in batch.items() if k in ["input_ids", "attention_mask"]}
         
-        return (loss, outputs) if return_outputs else loss
+        outputs = model(**batch)
+        
+        logits = outputs.logits.cpu()
+        all_logits.append(logits)
 
-training_args = TrainingArguments(
-    output_dir="./roberta_results",
-    num_train_epochs=3,
-    learning_rate=2e-5,
-    per_device_eval_batch_size=8,
-    warmup_steps=500,
-    weight_decay=0.01,
-    logging_dir='./logs',
-    logging_steps=50, 
-    eval_strategy="epoch",
-    save_strategy="epoch",
-    load_best_model_at_end=True,
-    remove_unused_columns=False, 
-    metric_for_best_model="f1",
-    seed=TRAINING_SEED,
-)
-
-trainer = WeightedTrainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=eval_dataset,
-    class_weights=class_weights,
-    compute_metrics=compute_metrics 
-)
-
-print("Starting training...")
-trainer.train()
-print("Training complete.")
-print("\nEvaluating on test set...")
-eval_results = trainer.evaluate()
-
-print("\n--- Evaluation Results ---")
-print(f"Accuracy: {eval_results['eval_accuracy']:.4f}")
-print(f"F1 (Macro): {eval_results['eval_f1']:.4f}")
-print(f"Recall (Macro): {eval_results['eval_recall']:.4f}")
-print("--------------------------")
+final_logits = torch.cat(all_logits, dim=0)
+print("Inference complete.")
 
 print("\n--- Starting Error Analysis ---")
 
-# 1. Get Predictions from trainer
-print("Running predictions on eval dataset for analysis...")
-predictions_output = trainer.predict(eval_dataset)
-
-logits = predictions_output.predictions
-y_true = predictions_output.label_ids
+# --- FIX: Use results from the manual loop, not trainer ---
+print("Processing results from manual inference...")
+logits = final_logits.numpy()
+y_true = np.array(eval_dataset['labels']) # Get true labels from the dataset
+# --- (End Fix) ---
 
 # 2. Get Probabilities, Predicted Labels, and Confidences
 probabilities = softmax(logits, axis=1)
@@ -154,9 +127,8 @@ confidences = np.max(probabilities, axis=1) # Confidence is the max probability
 # 3. Full Prediction Results (with Confidence)
 print("\n--- Full Prediction Results ---")
 
-# Get original texts from the eval_dataset
-# We need to get the 'text' column from the original dataset object
-original_texts = eval_dataset.dataset['text']
+# --- FIX: Get original texts from the eval_dataset directly ---
+original_texts = eval_dataset['text']
 
 df_analysis = pd.DataFrame({
     "text": original_texts,
@@ -167,8 +139,8 @@ df_analysis = pd.DataFrame({
     "prob_1 (hate)": probabilities[:, 1],
 })
 
-# Save full results to CSV
-analysis_file = Path(training_args.output_dir) / "full_evaluation_predictions.csv"
+# --- FIX: Use the defined OUTPUT_DIR ---
+analysis_file = OUTPUT_DIR / "full_evaluation_predictions.csv"
 df_analysis.to_csv(analysis_file, index=False)
 print(f"Full prediction results saved to: {analysis_file}")
 
@@ -213,7 +185,8 @@ plt.grid(alpha=0.4)
 plt.xlim(0, 1)
 plt.ylim(0, 1)
 
-plot_file = Path(training_args.output_dir) / "reliability_diagram.png"
+# --- FIX: Use the defined OUTPUT_DIR ---
+plot_file = OUTPUT_DIR / "reliability_diagram.png"
 plt.savefig(plot_file)
 print(f"Reliability diagram saved to: {plot_file}")
 print("--- Error Analysis Complete ---")
