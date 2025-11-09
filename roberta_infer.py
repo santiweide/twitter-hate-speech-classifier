@@ -147,7 +147,7 @@ print(df_errors_sorted.head(10).to_string(index=False))
 print("\n--- Calibration Analysis (Reliability) ---")
 n_bins = 10
 ece, bin_accs, bin_confs, bin_counts, bin_lowers = expected_calibration_error(
-    y_true, y_pred, confidences, n_bins=n_bins
+    y_true, y_pred, n_bins, confidences
 )
 
 print(f"Expected Calibration Error (ECE) @ {n_bins} bins: {ece:.4f}")
