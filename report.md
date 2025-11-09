@@ -4,34 +4,33 @@
 
 Automated hate speech detection is characterized by high subjectivity, complex context-dependency, and the pervasive use of implicit or coded language. It progressed from traditional machine learning classifiers trained on lexical features  to early deep learning models like LSTMs and GRUs. The advent of Transformer-based models, particularly BERT and its variants (e.g., RoBERTa, HateBERT), established a long-standing performance baseline. However, the current SOTA is characterized by two trends: (1) the application of Large Language Models (LLMs) like Llama 3 and GPT-4 , and (2) the development of highly specialized, fine-tuned embedding models. 
 
-Here two classifiers are implemented: NER+Bert and 
+Here two classifiers are implemented: NER+Bert(AmpleHate Model) and Bert-Embedding based model. Only English is considered while choosing model, so 
 
 
-1) Specializing General-Purpose Embeddings with LLm
+## NER+Bert
 
-source: Specializing General-purpose LLM Embeddings for Implicit Hate Speech Detection
+### Implement
 
-The most significant recent breakthrough involves adapting SOTA generalist embedding models specifically for the IHS domain. A 2025 paper, "Specializing General-purpose LLM Embeddings for Implicit Hate Speech Detection," demonstrates a new SOTA by fine-tuning models like NV-Embed, Stella, and E5.   
+### Effectiveness and Efficiency
+The model demonstrates exceptionally high overall accuracy (99.66%) on the test set of 3,197 samples, making only 11 incorrect predictions.
 
-The NV-Embed model, an ICLR 2025 paper, is a critical component. It established its own SOTA on the general-purpose Massive Text Embedding Benchmark (MTEB), setting record-high scores across 56 tasks.
+### Error Analysis
+Here Expected Calibration Error(ECE) is used to see %TODO, and also Slice-based (NER) Analysis is used to see if NER is making sense.
 
-2) Contrastive Learning in Embedding Space
+#### ECE
+An ECE (Expected Calibration Error) of 0.3795 is extremely high (a perfect score is 0). This indicates that the model's confidence scores are not reliable and do not reflect the true probability of its predictions being correct.
 
-source: AmpleHate: Amplifying the Attention for Versatile Implicit Hate Detection
+The model is chronically overconfident. When it predicts something with high confidence (e.g., 90-100%), its actual accuracy in that bin is likely much lower, as shown by the high ECE.
 
-AmpleHate focuses on "teaching" models the fine-grained difference between hateful and non-hateful content, particularly when they are lexically similar (e.g., implicit hate vs. neutral speech).
+#### NER-sliced
 
+The test set is highly imbalanced in this regard. 99.4% of the data (3,178 samples) does not contain a target entity, while only 0.6% (19 samples) does. The model's performance on the tiny slice of data with target entities (has_target_entity = 1) was perfect (1.0 accuracy). 
 
-
-## Effectiveness & Efficiency
-
-## Rigorous Evaluation
-* cross-dataset evaluation
+This implies that all 11 prediction errors occurred on the 3,178 samples without target entities. The model appears to handle text with 'LOC' (Location) and 'ORG' (Organization) entities perfectly, though the sample size (n=19) is too small to draw a definitive conclusion.
 
 
-## Generalizability & Robustness 
+#### Generalizability & Robustness 
 
-## Synthesis & Future Trajectories
 
 
 
