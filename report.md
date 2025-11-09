@@ -13,6 +13,14 @@ Since only one dataset is provided, while evaluating the model performance, 90% 
 Here the data is fed into NER pipeline first, then a Bert model is used for classification.
 
 ### Effectiveness and Efficiency
+
+Evaluated on 6,392 samples:
+```
+Accuracy: 0.9634
+F1 (Macro): 0.8664
+Recall (Macro): 0.8760
+```
+
 The model demonstrates exceptionally high overall accuracy (99.66%) on the test set of 3,197 samples, making only 11 incorrect predictions.
 
 For Efficiency, the NER preprocessing is optimized from sequencial to parallelf rolatency deduction.
@@ -41,3 +49,23 @@ This implies that all 11 prediction errors occurred on the 3,178 samples without
 Sequence classification model `cardiffnlp/twitter-roberta-base-hate` is fine tuned on the twitter dataset here. 
 
 ### Effectiveness and Efficiency
+
+The classifier demonstrates extremely high overall effectiveness on this dataset, achieving 98.4% accuracy. It is also highly reliable and well-calibrated, meaning its confidence scores are a trustworthy indicator of its correctness (ECE of 0.0152).
+
+However, the error analysis reveals a critical insight: the model's "most confident errors" are almost certainly not model failures. Instead, they appear to be mislabeled examples in the ground-truth dataset. The model is confidently (and likely correctly) classifying these tweets as "non-hate," while the dataset incorrectly labels them as "hate."
+
+Effectiveness:
+
+Evaluated on 6,392 samples:
+```
+Accuracy: 0.9840
+F1 (Macro): 0.9374
+Recall (Macro): 0.9172
+```
+
+Expected Calibration Error (ECE): 0.0152 An ECE this low (closer to 0 is perfect) is outstanding. It means the model's predicted confidences are highly accurate. For example, when the model is 95% confident in a prediction, it is correct about 95% of the time. The diagram confirms the low ECE. The red line (average confidence) tracks the blue bars (accuracy) almost perfectly, and both are extremely close to the ideal dashed line.
+
+
+#### Generalizability & Robustness 
+
+
