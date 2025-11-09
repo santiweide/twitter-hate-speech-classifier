@@ -21,7 +21,7 @@ import pandas as pd
 from pathlib import Path
 from transformers import set_seed
 
-from model import AmpleHateModel, create_preprocessing_function, TARGET_NER_LABELS
+from amphate_model import AmpleHateModel, create_preprocessing_function, TARGET_NER_LABELS
 
 TRAINING_SEED = 42
 set_seed(TRAINING_SEED)
@@ -130,7 +130,7 @@ def main():
     data_collator = DataCollatorWithPadding(tokenizer=base_tokenizer)
 
     training_args = TrainingArguments(
-        output_dir="./amplehate_results",
+        output_dir="./amplehate_results_test",
         num_train_epochs=6,
         per_device_train_batch_size=16,
         per_device_eval_batch_size=16,
