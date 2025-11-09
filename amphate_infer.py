@@ -91,9 +91,12 @@ def expected_calibration_error(probs, labels, n_bins=10):
 #
 def has_target_entity(ner_list):
     """检查NER结果列表是否包含任何目标实体"""
-    if not isinstance(ner_list, list): return False
+    # 检查是否可迭代。这可以正确处理列表、数组、None 和 np.nan
+    if not hasattr(ner_list, '__iter__'):
+        return False
     # 使用从 amphate_model 导入的 TARGET_NER_LABELS
-    return any(e.get("entity_group") in TARGET_NER_LABELS for e in ner_list)
+    # 添加 isinstance(e, dict) 以安全处理可迭代对象中可能的非字典项
+    return any(isinstance(e, dict) and e.get("entity_group") in TARGET_NER_LABELS for e in ner_list)
 
 def slice_metrics(df, slice_col):
     """
@@ -325,18 +328,10 @@ def run_inference_and_analysis():
     rows = []
     # 使用从 amphate_model 导入的 TARGET_NER_LABELS
     for ent in sorted(TARGET_NER_LABELS):
-        
-        # --- [FIX] ---
-        # 修复 ValueError: The truth value of an array ... is ambiguous.
-        # 原因: `pd.notna(lst)` 当 lst 是一个数组时，会返回一个布尔数组。
-        #      `if` 语句无法处理布尔数组。
-        # 修复: 使用 `not pd.isna(lst)`，它会正确地检查 `lst` 容器本身是否为 null，
-        #      并始终返回一个单独的布尔值。
         mask = test_df["ner_results"].map(
             lambda lst: any(isinstance(e, dict) and e.get("entity_group") == ent 
-                            for e in (lst if not pd.isna(lst) and hasattr(lst, '__iter__') else []))
+                            for e in (lst if hasattr(lst, '__iter__') else []))
         )
-        # --- [END FIX] ---
         
         # 将掩码应用于 df_analysis
         sub = df_analysis[mask]
