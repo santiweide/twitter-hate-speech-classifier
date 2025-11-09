@@ -22,7 +22,7 @@ INSTRUCTION = "Classify the given tweet as hate speech or not."
 MAX_LENGTH = 512
 # --- MODIFIED: 这现在是我们唯一的批处理大小 ---
 # 从 8 开始。如果 OOM，请尝试 4、2，最后是 1。
-EFFECTIVE_BATCH_SIZE = 8
+EFFECTIVE_BATCH_SIZE = 1
 # -----------------------------------------------
 
 # --- MODIFIED HELPER FUNCTION ---

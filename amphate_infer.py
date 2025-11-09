@@ -21,20 +21,16 @@ TRAINING_SEED = 42
 set_seed(TRAINING_SEED)
 
 def run_inference_and_analysis():
-    print("--- 🚀 开始推理和错误分析 ---")
-    
-    # --- 1. 定义路径和模型名称 ---
+
     CHECKPOINT_PATH = "./amplehate_results/checkpoint-10788"
     BASE_MODEL_NAME = "bert-base-cased"
     NER_MODEL_NAME = "dslim/bert-base-NER"
 
-    print(f"加载模型: {CHECKPOINT_PATH}")
-    print(f"基础 Tokenizer: {BASE_MODEL_NAME}")
+    print(f"loading checkpoint from: {CHECKPOINT_PATH}")
+    print(f"Using Tokenizer: {BASE_MODEL_NAME}")
 
-    # --- 2. 加载训练好的模型和 Tokenizer ---
     base_tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_NAME)
     
-    # 关键：这现在可以正常工作，因为 AmpleHateModel 已经从 model.py 导入
     model = AmpleHateModel.from_pretrained(CHECKPOINT_PATH)
     
     data_collator = DataCollatorWithPadding(tokenizer=base_tokenizer)
