@@ -42,7 +42,34 @@ This implies that all 11 prediction errors occurred on the 3,178 samples without
 
 #### Generalizability & Robustness 
 
+There is a sharp performance drop on the 'ethos' dataset (61.5% accuracy) is characteristic of "brittle" models. This failure to generalize to out-of-distribution (OOD) data is a very common finding and is highly likely to recur on any new dataset that differs semantically or stylistically from its training source.
 
+However, the model achieves near-perfect accuracy (98.5-99.5%) on perturbed versions of its original data (Typos, NER Ablation). This suggests it is highly optimized for its specific training distribution. This high performance is repeatable only on data extremely similar to its training set.
+
+```
+Model: Roberta; Dataset: OOD - Ethos
+Accuracy:     0.6152
+F1 (Macro):   0.5693
+Recall (Macro): 0.5822
+ECE (10 bins):  0.1008
+```
+
+
+```
+Model: Roberta; Dataset: Robustness - Typos (p=0.05)
+Accuracy:     0.9847
+F1 (Macro):   0.9401
+Recall (Macro): 0.9267
+ECE (10 bins):  0.3733
+```
+
+```
+Model: Roberta; Dataset: Robustness - NER Ablation (No Entities)
+Accuracy:     0.9947
+F1 (Macro):   0.9797
+Recall (Macro): 0.9768
+ECE (10 bins):  0.3754
+```
 
 ## Model 2: Roberta
 
@@ -69,13 +96,15 @@ Expected Calibration Error (ECE): 0.0152 An ECE this low (closer to 0 is perfect
 #### Generalizability & Robustness 
 The model's ability to generalize to datasets it wasn't trained on is very poor.
 
-This was tested on the 'ethos' (binary) dataset, which represents out-of-distribution (OOD) data. The results show a dramatic drop in performance compared to the in-domain metrics:
+This was tested on the 'ethos' (binary) dataset, which represents OOD data. The results show a dramatic drop in performance compared to the in-domain metrics:
 
+```
 Accuracy: Fell from 98.4% to 67.9%
 
 F1 (Macro): Dropped to 66.9%
 
 Calibration (ECE): Worsened significantly from 0.0152 to 0.3078
+```
 
 This high ECE score indicates the model is no longer calibrated on this new data; its confidence scores are highly unreliable. The model is over-confident in its (often incorrect) predictions.
 
@@ -86,13 +115,32 @@ For robustness, in contrast to its poor generalizability, the model is extremely
 
 This was tested by applying two modifications to the original dataset:
 
-Lowercase:
 
-Accuracy: 0.9840 (No change)
+```
+Model: Roberta; Dataset: OOD - Ethos (binary)
+Accuracy:     0.6794
+F1 (Macro):   0.6686
+Recall (Macro): 0.6672
+ECE (10 bins):  0.3078
+```
 
-F1 (Macro): 0.9374 (No change)
 
-ECE: 0.0152 (No change)
+
+```
+Model: Roberta; Dataset: Robustness - Lowercase
+Accuracy:     0.9840
+F1 (Macro):   0.9374
+Recall (Macro): 0.9172
+ECE (10 bins):  0.0152
+```
+
+```
+Model: Roberta; Dataset: Robustness - Typos (p=0.05)
+Accuracy:     0.9797
+F1 (Macro):   0.9200
+Recall (Macro): 0.8998
+ECE (10 bins):  0.0189
+```
 
 Result: Converting all text to lowercase had zero impact on the model's performance or calibration. This is expected from a robust model like RoBERTa.
 
