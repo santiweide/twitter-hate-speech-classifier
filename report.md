@@ -4,7 +4,8 @@
 
 Automated hate speech detection is characterized by high subjectivity, complex context-dependency, and the pervasive use of implicit or coded language. It progressed from traditional machine learning classifiers trained on lexical features  to early deep learning models like LSTMs and GRUs. The advent of Transformer-based models, particularly BERT and its variants (e.g., RoBERTa, HateBERT), established a long-standing performance baseline. However, the current SOTA is characterized by two trends: (1) the application of Large Language Models (LLMs) like Llama 3 and GPT-4 , and (2) the development of highly specialized, fine-tuned embedding models. 
 
-Here two classifiers are implemented: NER+Bert(AmpleHate Model) and Bert-Embedding based model. Only English is considered while choosing model, so 
+Here two classifiers are implemented: NER+Bert and Roberta Embedding based model. There is a class imbalance in the training data so weighted class is applied to both fine-tuning process. NaN data is also filtered indicating there is no label or tweet.
+
 
 
 ## NER+Bert
