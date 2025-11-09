@@ -14,7 +14,7 @@ from datasets import Dataset
 import kagglehub
 from tqdm import tqdm
 
-from model import AmpleHateModel, create_preprocessing_function, TARGET_NER_LABELS
+from amphate_model import AmpleHateModel, create_preprocessing_function, TARGET_NER_LABELS
 
 
 TRAINING_SEED = 42
