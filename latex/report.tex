@@ -99,7 +99,7 @@ RoBERTa & Robust (Typos) & 0.9797 & 0.9200 & 0.8998 & 0.0189 \\
 \subsection{Effectiveness and Efficiency}
 \begin{itemize}
     \item \textbf{Effectiveness:} The RoBERTa model is demonstrably more effective. It has higher in-domain accuracy (98.4\% vs 96.3\%) and F1-score (0.937 vs 0.866). Critically, its strong calibration (ECE 0.0152) makes it a far more reliable and trustworthy model than the overconfident NER+BERT.
-    \item \textbf{Efficiency:} Here resource computation efficiency is focused. There is parallelization of the NER pipeline, no comparative metrics on latency on throughput yet due to tie limit.
+    \item \textbf{Efficiency:} Here resource computation efficiency is focused, and the metrics are latency is analyzed by torch profile. Only inference time efficiency is analyzed due to time limit.
  \end{itemize}
 
 \subsection{Insights from Error Analysis}

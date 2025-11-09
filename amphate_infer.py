@@ -16,6 +16,10 @@ from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 
+# --- ADDED FOR PROFILER ---
+from torch.profiler import profile, record_function, ProfilerActivity
+# --------------------------
+
 from amphate_model import AmpleHateModel, create_preprocessing_function, TARGET_NER_LABELS
 from my_metrics import expected_calibration_error
 
@@ -43,7 +47,7 @@ def slice_metrics(df, slice_col):
         n = len(sub_df)
         acc = sub_df["correct"].mean()
         
-        # FPR (False Positive Rate) 
+        # FPR (False PositiveRate) 
         fpr_slice = ((sub_df["true_label"] == 0) & (sub_df["predicted_label"] == 1)).sum() / n
         
         # FNR (False Negative Rate) 
@@ -271,6 +275,12 @@ def run_inference_and_analysis():
     analysis_dir.mkdir(parents=True, exist_ok=True)
     print(f"Analysis artifacts will be saved to: {analysis_dir.resolve()}")
 
+    # --- ADDED: Create directory for profiler logs ---
+    profile_log_dir = Path("profile_logs")
+    profile_log_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Profiler logs will be saved to: {profile_log_dir.resolve()}")
+    # --------------------------------------------------
+
     print(f"Loading checkpoint from: {CHECKPOINT_PATH}")
     print(f"Using Tokenizer: {BASE_MODEL_NAME}")
 
@@ -310,7 +320,26 @@ def run_inference_and_analysis():
 
     print("Pre-computing NER results for TEST set...")
     test_texts_list = list(test_dataset_raw["text"])
-    test_ner_results = ner_pipeline(test_texts_list, batch_size=64)
+    
+    # --- PROFILER ADDED for NER ---
+    print("\nProfiling NER pipeline...")
+    with profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True,
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(
+            str(profile_log_dir / "ner_pipeline")
+        )
+    ) as prof_ner:
+        with record_function("ner_pipeline_inference"):
+            test_ner_results = ner_pipeline(test_texts_list, batch_size=64)
+            
+    print("\n--- NER Profiler Summary ---")
+    print(prof_ner.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    print(f"NER profile trace saved. View in TensorBoard:\n tensorboard --logdir {profile_log_dir}")
+    # --- END PROFILER ---
+
     test_dataset_raw = test_dataset_raw.add_column("ner_results", test_ner_results)
 
     print("Tokenizing TEST set...")
@@ -333,14 +362,31 @@ def run_inference_and_analysis():
     
     all_logits = []
 
-    with torch.no_grad(): # Disable gradient calculation
-        for batch in tqdm(test_dataloader, desc="Inference"):
-            batch = {k: v.to(device) for k, v in batch.items()}
-            
-            outputs = model(**batch)
-            
-            logits = outputs.logits.cpu()
-            all_logits.append(logits)
+    # --- PROFILER ADDED for main model inference ---
+    print("\nProfiling Main Model inference loop...")
+    with profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True,
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(
+            str(profile_log_dir / "main_model_inference")
+        )
+    ) as prof_main:
+        with torch.no_grad(): # Disable gradient calculation
+            for batch in tqdm(test_dataloader, desc="Inference"):
+                batch = {k: v.to(device) for k, v in batch.items()}
+                
+                with record_function("model_forward_pass"):
+                    outputs = model(**batch)
+                
+                logits = outputs.logits.cpu()
+                all_logits.append(logits)
+
+    print("\n--- Main Model Profiler Summary ---")
+    print(prof_main.key_averages().table(sort_by="cuda_time_total", row_limit=15))
+    print(f"Main Model profile trace saved. View in TensorBoard:\n tensorboard --logdir {profile_log_dir}")
+    # --- END PROFILER ---
 
     final_logits = torch.cat(all_logits, dim=0)
     print("Inference complete.")
