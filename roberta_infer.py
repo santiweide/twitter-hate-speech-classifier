@@ -14,6 +14,10 @@ import sys
 from sklearn.metrics import accuracy_score, f1_score, recall_score 
 from transformers import set_seed
 
+# --- ADDED FOR PROFILER ---
+from torch.profiler import profile, record_function, ProfilerActivity
+# --------------------------
+
 from torch.utils.data import DataLoader
 from transformers import DataCollatorWithPadding
 from tqdm.auto import tqdm
@@ -79,6 +83,7 @@ def expected_calibration_error(probs, labels, n_bins=10):
 def run_evaluation(dataset, model, data_collator, device):
     """
     NEW: Reusable function to run inference on any given dataset.
+    --- PROFILER: Added record_function calls for granular analysis ---
     """
     original_format = dataset.format
     dataset.set_format(type='torch', columns=['input_ids', 'attention_mask', 'labels'])
@@ -95,18 +100,26 @@ def run_evaluation(dataset, model, data_collator, device):
     model.eval()
     with torch.no_grad():
         for batch in tqdm(eval_dataloader, desc="Running evaluation"):
-            all_labels.append(batch['labels'].cpu())
-            model_inputs = {
-                k: v.to(device) for k, v in batch.items() 
-                if k in ["input_ids", "attention_mask"] 
-            }
+            
+            with record_function("data_to_cpu"):
+                all_labels.append(batch['labels'].cpu())
+            
+            with record_function("data_to_device"):
+                model_inputs = {
+                    k: v.to(device) for k, v in batch.items() 
+                    if k in ["input_ids", "attention_mask"] 
+                }
+            
             if not model_inputs:
                 print("Warning: Batch contains no model inputs.")
                 continue
-                
-            outputs = model(**model_inputs)
-            logits = outputs.logits.cpu()
-            all_logits.append(logits)
+            
+            with record_function("model_forward_pass"):
+                outputs = model(**model_inputs)
+            
+            with record_function("logits_to_cpu"):
+                logits = outputs.logits.cpu()
+                all_logits.append(logits)
     
     if not all_logits:
         print("Error: No logits were generated. Check dataset and inputs.")
@@ -208,8 +221,37 @@ raw_eval_labels = eval_dataset['labels']
 
 print(f"Baseline Eval dataset size: {len(eval_dataset)}")
 
-print("\n--- 2. Running Baseline In-Domain Evaluation ---")
-y_true_base, probs_base = run_evaluation(eval_dataset, model, data_collator, device)
+print("\n--- 2. Running Baseline In-Domain Evaluation (with Profiler) ---")
+
+# --- PROFILER ADDED ---
+profile_log_dir = OUTPUT_DIR / "profile_logs"
+profile_log_dir.mkdir(parents=True, exist_ok=True)
+print(f"Profiler logs will be saved to: {profile_log_dir.resolve()}")
+
+activities = [ProfilerActivity.CPU]
+if torch.cuda.is_available():
+    activities.append(ProfilerActivity.CUDA)
+
+with profile(
+    activities=activities,
+    record_shapes=True,      # Records tensor shapes
+    profile_memory=True,     # Reports memory usage
+    with_stack=True,         # Records source code location
+    on_trace_ready=torch.profiler.tensorboard_trace_handler(
+        str(profile_log_dir / "baseline_evaluation") # Saves trace for TensorBoard
+    )
+) as prof:
+    with record_function("baseline_evaluation_run"): # Label for the whole run
+        y_true_base, probs_base = run_evaluation(eval_dataset, model, data_collator, device)
+
+print("\n--- Profiler Summary (Baseline Evaluation) ---")
+# Print a summary table to the console, sorted by total CUDA time
+sort_key = "cuda_time_total" if torch.cuda.is_available() else "cpu_time_total"
+print(prof.key_averages().table(sort_by=sort_key, row_limit=15))
+print(f"Profile trace saved. View in TensorBoard:\n tensorboard --logdir {profile_log_dir}")
+# --- END PROFILER ---
+
+
 compute_and_print_metrics(y_true_base, probs_base, "Baseline (In-Domain)")
 
 print("\n--- Baseline Error Analysis ---")
