@@ -79,7 +79,7 @@ def remap_davidson_labels(example):
     Class 1 (offensive) -> 0
     Class 2 (neither) -> 0
     """
-    example['labels'] = 1 if example['class'] == 0 else 0
+    example['label'] = 1 if example['class'] == 0 else 0 # <-- FIX: Use 'label'
     example['text'] = example['tweet'] # Rename column
     return example
 
@@ -217,7 +217,7 @@ def run_generalizability_and_robustness_experiments():
         path = kagglehub.dataset_download("vkrahul/twitter-hate-speech")
         data_file_path = Path(path) / "train_E6oV3lV.csv"
         df = pd.read_csv(data_file_path)
-        df = df[['label', 'tweet']].rename(columns={"tweet": "text", "label": "labels"})
+        df = df[['label', 'tweet']].rename(columns={"tweet": "text"}) # <-- FIX: Do not rename 'label'
         df = df.dropna(subset=['text'])
         dataset = Dataset.from_pandas(df)
         dataset_split = dataset.shuffle(seed=TRAINING_SEED).train_test_split(test_size=0.1)
@@ -233,7 +233,7 @@ def run_generalizability_and_robustness_experiments():
     try:
         print("\nLoading OOD Dataset 1: 'ethos' (binary)")
         ethos_raw = load_dataset("ethos", "binary", split="train") # Use train as test
-        ethos_raw = ethos_raw.rename_column("label", "labels")
+        # <-- FIX: Deleted the rename_column line. The 'label' column is correct.
         
         y_true_ethos, y_prob_ethos = run_evaluation_pipeline(
             ethos_raw, ner_pipeline, preprocess_fn, model, data_collator, device
