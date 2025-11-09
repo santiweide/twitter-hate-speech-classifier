@@ -301,6 +301,7 @@ def run_inference_and_analysis():
         model=ner_model,
         tokenizer=ner_tokenizer,
         aggregation_strategy="simple"
+        device=device
     )
 
     path = kagglehub.dataset_download("vkrahul/twitter-hate-speech")
