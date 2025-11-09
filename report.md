@@ -8,12 +8,14 @@ Here two classifiers are implemented: NER+Bert and Roberta Embedding based model
 
 
 
-## NER+Bert
+## Model 1: NER+Bert
 
 ### Implement
 
 ### Effectiveness and Efficiency
 The model demonstrates exceptionally high overall accuracy (99.66%) on the test set of 3,197 samples, making only 11 incorrect predictions.
+
+For Efficiency, 
 
 ### Error Analysis
 Here Expected Calibration Error(ECE) is used to see %TODO, and also Slice-based (NER) Analysis is used to see if NER is making sense.
@@ -34,4 +36,4 @@ This implies that all 11 prediction errors occurred on the 3,178 samples without
 
 
 
-
+## Model 2: 
