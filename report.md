@@ -67,5 +67,43 @@ Expected Calibration Error (ECE): 0.0152 An ECE this low (closer to 0 is perfect
 
 
 #### Generalizability & Robustness 
+The model's ability to generalize to datasets it wasn't trained on is very poor.
+
+This was tested on the 'ethos' (binary) dataset, which represents out-of-distribution (OOD) data. The results show a dramatic drop in performance compared to the in-domain metrics:
+
+Accuracy: Fell from 98.4% to 67.9%
+
+F1 (Macro): Dropped to 66.9%
+
+Calibration (ECE): Worsened significantly from 0.0152 to 0.3078
+
+This high ECE score indicates the model is no longer calibrated on this new data; its confidence scores are highly unreliable. The model is over-confident in its (often incorrect) predictions.
+
+The model appears to be overfitted to its original training data and does not generalize well to different types or phrasings of hate speech, as seen in the 'ethos' dataset.
 
 
+For robustness, in contrast to its poor generalizability, the model is extremely robust to common text perturbations.
+
+This was tested by applying two modifications to the original dataset:
+
+Lowercase:
+
+Accuracy: 0.9840 (No change)
+
+F1 (Macro): 0.9374 (No change)
+
+ECE: 0.0152 (No change)
+
+Result: Converting all text to lowercase had zero impact on the model's performance or calibration. This is expected from a robust model like RoBERTa.
+
+Typo Injection (5% rate):
+
+Accuracy: 0.9797 (A negligible drop of ~0.4%)
+
+F1 (Macro): 0.9200 (A very slight drop)
+
+ECE: 0.0189 (Remains exceptionally well-calibrated)
+
+Result: Introducing random spelling mistakes had a minimal, almost negligible, effect on the model's accuracy and reliability.
+
+Conclusion: The model is highly resilient to simple noise like case changes and typos, maintaining its high performance and strong calibration.
