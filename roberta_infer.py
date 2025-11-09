@@ -188,7 +188,7 @@ MODEL = "cardiffnlp/twitter-roberta-base-hate" # Base model for tokenizer
 
 tokenizer = AutoTokenizer.from_pretrained(MODEL)
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-model = AutoModelForClassification.from_pretrained(CHECKPOINT_PATH, num_labels=2)
+model = AutoModelForSequenceClassification.from_pretrained(CHECKPOINT_PATH, num_labels=2)
 tokenize_function = create_tokenizer_function(tokenizer)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
