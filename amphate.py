@@ -19,7 +19,10 @@ from sklearn.metrics import f1_score, accuracy_score, recall_score
 import kagglehub
 import pandas as pd
 from pathlib import Path
+from transformers import set_seed
 
+TRAINING_SEED = 42
+set_seed(TRAINING_SEED)
 
 # --- Evaluation Results ---
 # Accuracy: 0.9634
@@ -137,7 +140,6 @@ class AmpleHateModel(BertPreTrainedModel):
 # Define the NER labels AmpleHate considers "explicit targets"
 TARGET_NER_LABELS = {"ORG", "NORP", "GPE", "LOC", "EVENT"}
 
-# --- 🌟 MODIFIED FUNCTION 🌟 ---
 def create_preprocessing_function(tokenizer):
     """
     Creates a function to preprocess text data, aligning NER tags
@@ -207,8 +209,6 @@ def compute_metrics(p):
         "f1": f1,
         "recall": recall,
     }
-
-
 
 def main():
     print("Setting up models and tokenizers...")
@@ -299,10 +299,11 @@ def main():
         per_device_eval_batch_size=16,
         logging_dir="./logs",
         logging_steps=100,
-        learning_rate=2e-5,
+        learning_rate=2e-6,
         max_grad_norm=1.0,
         fp16=False,
         warmup_ratio=0.1,
+        seed=TRAINING_SEED,
     )
     trainer = Trainer(
         model=model,
@@ -328,6 +329,7 @@ def main():
     print(f"F1 (Macro): {eval_results['eval_f1']:.4f}")
     print(f"Recall (Macro): {eval_results['eval_recall']:.4f}")
     print("--------------------------")
+
 
 if __name__ == "__main__":
     main()
