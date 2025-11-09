@@ -300,7 +300,7 @@ def run_inference_and_analysis():
         "ner",
         model=ner_model,
         tokenizer=ner_tokenizer,
-        aggregation_strategy="simple"
+        aggregation_strategy="simple",
         device=device
     )
 
