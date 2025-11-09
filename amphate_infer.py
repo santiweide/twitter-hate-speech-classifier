@@ -19,6 +19,10 @@ import matplotlib.pyplot as plt
 from amphate_model import AmpleHateModel, create_preprocessing_function, TARGET_NER_LABELS
 from my_metrics import expected_calibration_error
 
+from datasets import load_dataset # NEW: Added load_dataset
+import random # NEW: For typo injection
+from sklearn.metrics import accuracy_score, f1_score, recall_score # NEW: For metrics function
+
 TRAINING_SEED = 42
 set_seed(TRAINING_SEED)
 
@@ -53,6 +57,227 @@ def slice_metrics(df, slice_col):
     
     return grouped.reset_index()
 
+# ==========================================================
+# --- 🛠️ NEW HELPER FUNCTIONS FOR EXPERIMENTS ---
+# ==========================================================
+
+def add_typos(example, p=0.05):
+    """Adds typos to the 'text' field of an example."""
+    text = example['text']
+    if not isinstance(text, str): return example
+    chars = list(text)
+    for i in range(len(chars)):
+        if random.random() < p and chars[i].isalpha(): # Only corrupt letters
+            chars[i] = random.choice('abcdefghijklmnopqrstuvwxyz')
+    example['text'] = "".join(chars)
+    return example
+
+def remap_davidson_labels(example):
+    """
+    Maps Davidson dataset labels (0, 1, 2) to our binary labels (1, 0, 0).
+    Class 0 (hate) -> 1
+    Class 1 (offensive) -> 0
+    Class 2 (neither) -> 0
+    """
+    example['labels'] = 1 if example['class'] == 0 else 0
+    example['text'] = example['tweet'] # Rename column
+    return example
+
+def compute_and_print_metrics(y_true, y_prob, dataset_name):
+    """Calculates and prints standard metrics for a given experiment."""
+    if y_true is None or y_prob is None:
+        print(f"Skipping metrics for {dataset_name} due to evaluation error.")
+        return
+
+    y_pred = np.argmax(y_prob, axis=1)
+    
+    acc = accuracy_score(y_true, y_pred)
+    f1 = f1_score(y_true, y_pred, average="macro")
+    recall = recall_score(y_true, y_pred, average="macro")
+    # Note: This assumes you have expected_calibration_error in my_metrics.py
+    # If not, you may need to copy it here as well.
+    try:
+        ece, _ = expected_calibration_error(y_prob, y_true, n_bins=10)
+    except Exception as e:
+        print(f"Could not calculate ECE: {e}")
+        ece = np.nan
+    
+    print("\n" + "="*30)
+    print(f"📊 METRICS FOR: {dataset_name}")
+    print(f"Accuracy:     {acc:.4f}")
+    print(f"F1 (Macro):   {f1:.4f}")
+    print(f"Recall (Macro): {recall:.4f}")
+    print(f"ECE (10 bins):  {ece:.4f}")
+    print("="*30 + "\n")
+
+def run_evaluation_pipeline(
+    raw_dataset, 
+    ner_pipeline, 
+    preprocess_fn, 
+    model, 
+    data_collator, 
+    device, 
+    ner_results_override=None
+):
+    """
+    Runs the full NER -> Preprocessing -> Inference pipeline on a raw dataset.
+    """
+    print(f"\n--- Running evaluation for: {raw_dataset.builder_name or 'custom'} ---")
+    print("Pre-computing NER results...")
+    if ner_results_override is not None:
+        print("Using NER results override.")
+        test_ner_results = ner_results_override
+    else:
+        test_texts_list = list(raw_dataset["text"])
+        test_ner_results = ner_pipeline(test_texts_list, batch_size=64)
+    
+    # Add NER results column to dataset
+    try:
+        eval_dataset_with_ner = raw_dataset.remove_columns("ner_results")
+    except:
+        eval_dataset_with_ner = raw_dataset
+    eval_dataset_with_ner = eval_dataset_with_ner.add_column("ner_results", test_ner_results)
+
+    print("Tokenizing TEST set...")
+    tokenized_eval_dataset = eval_dataset_with_ner.map(preprocess_fn, batched=True, load_from_cache_file=False)
+    
+    y_true = np.array(tokenized_eval_dataset["labels"]) 
+    
+    # Remove non-model columns
+    columns_to_remove = [
+        col for col in tokenized_eval_dataset.column_names 
+        if col not in ["input_ids", "attention_mask", "token_type_ids"]
+    ]
+    if columns_to_remove:
+        tokenized_eval_dataset = tokenized_eval_dataset.remove_columns(columns_to_remove)
+    tokenized_eval_dataset.set_format("torch")
+    
+    print("Starting manual forward pass...")
+    eval_dataloader = DataLoader(
+        tokenized_eval_dataset,
+        batch_size=16,
+        collate_fn=data_collator
+    )
+    
+    all_logits = []
+    with torch.no_grad():
+        for batch in tqdm(eval_dataloader, desc="Inference"):
+            batch = {k: v.to(device) for k, v in batch.items()}
+            outputs = model(**batch)
+            logits = outputs.logits.cpu()
+            all_logits.append(logits)
+
+    final_logits = torch.cat(all_logits, dim=0)
+    print("Inference complete.")
+    
+    probabilities = torch.softmax(final_logits, dim=1).numpy()
+    
+    return y_true, probabilities
+
+
+def run_generalizability_and_robustness_experiments():
+    """
+    Runs the new experiment suite.
+    This function re-loads the models to avoid modifying the
+    original run_inference_and_analysis() function.
+    """
+    
+    print("\n" + "#"*60)
+    print("### STARTING GENERALIZABILITY & ROBUSTNESS EXPERIMENTS ###")
+    print("#"*60 + "\n")
+    
+    # --- 1. Setup Models, Tokenizers, and Pipelines ---
+    # This duplicates the loading from the function above,
+    # as requested, to keep the functions separate.
+    print("--- 1. Loading Models and Pipelines for Experiments ---")
+    CHECKPOINT_PATH = "./amplehate_results/checkpoint-10788"
+    BASE_MODEL_NAME = "bert-base-cased"
+    NER_MODEL_NAME = "dslim/bert-base-NER"
+
+    base_tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_NAME)
+    model = AmpleHateModel.from_pretrained(CHECKPOINT_PATH)
+    data_collator = DataCollatorWithPadding(tokenizer=base_tokenizer)
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    model.eval()
+    
+    ner_tokenizer = AutoTokenizer.from_pretrained(NER_MODEL_NAME)
+    ner_model = AutoModelForTokenClassification.from_pretrained(NER_MODEL_NAME)
+    ner_pipeline = pipeline(
+        "ner", model=ner_model, tokenizer=ner_tokenizer, 
+        aggregation_strategy="simple", device=device
+    )
+    preprocess_fn = create_preprocessing_function(base_tokenizer)
+    print("All models loaded for experiments.")
+
+    # --- 2. Load Baseline Test Data (for robustness tests) ---
+    print("\n--- 2. Loading Baseline Data for Experiments ---")
+    try:
+        path = kagglehub.dataset_download("vkrahul/twitter-hate-speech")
+        data_file_path = Path(path) / "train_E6oV3lV.csv"
+        df = pd.read_csv(data_file_path)
+        df = df[['label', 'tweet']].rename(columns={"tweet": "text", "label": "labels"})
+        df = df.dropna(subset=['text'])
+        dataset = Dataset.from_pandas(df)
+        dataset_split = dataset.shuffle(seed=TRAINING_SEED).train_test_split(test_size=0.1)
+        test_dataset_raw = dataset_split["test"]
+    except Exception as e:
+        print(f"Failed to load baseline dataset: {e}")
+        return
+
+    # --- 3. Run Generalizability (OOD) Experiment ---
+    print("\n--- 3. Running Generalizability (OOD) Experiment ---")
+    
+    # Test 3.1: Ethos
+    try:
+        print("\nLoading OOD Dataset 1: 'ethos' (binary)")
+        ethos_raw = load_dataset("ethos", "binary", split="train") # Use train as test
+        ethos_raw = ethos_raw.rename_column("label", "labels")
+        
+        y_true_ethos, y_prob_ethos = run_evaluation_pipeline(
+            ethos_raw, ner_pipeline, preprocess_fn, model, data_collator, device
+        )
+        compute_and_print_metrics(y_true_ethos, y_prob_ethos, "OOD - Ethos")
+    except Exception as e:
+        print(f"Failed to run 'ethos' evaluation: {e}")
+
+    # Test 3.2: Davidson
+    try:
+        print("\nLoading OOD Dataset 2: 'davidson/hate_speech_and_offensive_language'")
+        davidson_raw = load_dataset("davidson/hate_speech_and_offensive_language", split="train")
+        davidson_raw = davidson_raw.map(remap_davidson_labels, remove_columns=["class", "count", "tweet"])
+        
+        y_true_davidson, y_prob_davidson = run_evaluation_pipeline(
+            davidson_raw, ner_pipeline, preprocess_fn, model, data_collator, device
+        )
+        compute_and_print_metrics(y_true_davidson, y_prob_davidson, "OOD - Davidson (Remapped)")
+    except Exception as e:
+        print(f"Failed to run 'davidson' evaluation: {e}")
+
+    # --- 4. Run Robustness (Perturbation) Experiment ---
+    print("\n--- 4. Running Robustness (Perturbation) Experiment ---")
+    
+    # Test 4.1: Text Perturbation (Typos)
+    print("\nCreating Perturbation 1: Typo Injection (p=0.05)")
+    test_data_typos = test_dataset_raw.map(add_typos, load_from_cache_file=False)
+    y_true_typo, y_prob_typo = run_evaluation_pipeline(
+        test_data_typos, ner_pipeline, preprocess_fn, model, data_collator, device
+    )
+    compute_and_print_metrics(y_true_typo, y_prob_typo, "Robustness - Typos (p=0.05)")
+
+    # Test 4.2: Feature Perturbation (NER Ablation)
+    print("\nCreating Perturbation 2: NER Ablation (No Entities)")
+    # Create a list of empty lists, one for each sample in the test set
+    empty_ner_results = [[] for _ in range(len(test_dataset_raw))]
+    
+    y_true_ner, y_prob_ner = run_evaluation_pipeline(
+        test_dataset_raw, ner_pipeline, preprocess_fn, model, data_collator, device,
+        ner_results_override=empty_ner_results # Pass in the empty results
+    )
+    compute_and_print_metrics(y_true_ner, y_prob_ner, "Robustness - NER Ablation (No Entities)")
+    
+    print("\n--- All Experiments Complete ---")
 
 def run_inference_and_analysis():
 
@@ -259,3 +484,6 @@ def run_inference_and_analysis():
 
 if __name__ == "__main__":
     run_inference_and_analysis()
+
+    print("\n\nRunning Generalizability and Robustness Suite...")
+    run_generalizability_and_robustness_experiments()
