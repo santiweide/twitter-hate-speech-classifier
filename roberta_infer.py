@@ -178,6 +178,7 @@ def remap_davidson_labels(example):
     example['labels'] = 1 if example['class'] == 0 else 0
     return example
 
+
 # ==========================================================
 # --- 1. MODEL AND BASELINE DATA LOADING ---
 # ==========================================================
@@ -220,9 +221,9 @@ tokenized_dataset = tokenized_dataset.rename_column("label", "labels")
 split_dataset = tokenized_dataset.train_test_split(test_size=0.2, seed=TRAINING_SEED)
 eval_dataset = split_dataset['test'] # <-- This dataset NOW contains the 'text' column
 
-# --- FIX: Get text directly from eval_dataset. Delete failing index code. ---
+# --- FIX: Get text and labels directly from eval_dataset. ---
 raw_eval_texts = eval_dataset['text']
-# The redundant raw_eval_labels line is also removed.
+raw_eval_labels = eval_dataset['labels'] # <-- THIS IS THE FIX
 # ------------------ END OF FIX ------------------
 
 print(f"Baseline Eval dataset size: {len(eval_dataset)}")
