@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.26 (TeX Live 2024) (preloaded format=pdflatex 2024.8.23)  9 NOV 2025 20:23
+This is pdfTeX, Version 3.141592653-2.6-1.40.26 (TeX Live 2024) (preloaded format=pdflatex 2024.8.23)  9 NOV 2025 21:07
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -455,6 +455,12 @@ Underfull \hbox (badness 1540) in paragraph at lines 45--46
 \T1/cmr/m/n/10 (+20) speech de-tec-tion. Both mod-els were
  []
 
+LaTeX Font Info:    External font `cmex10' loaded for size
+(Font)              <10.95> on input line 51.
+LaTeX Font Info:    External font `cmex10' loaded for size
+(Font)              <9> on input line 51.
+LaTeX Font Info:    External font `cmex10' loaded for size
+(Font)              <5> on input line 51.
 LaTeX Font Info:    Trying to load font information for T1+zi4 on input line 52
 .
 (/usr/local/texlive/2024/texmf-dist/tex/latex/inconsolata/t1zi4.fd
@@ -476,8 +482,6 @@ Underfull \hbox (badness 10000) in paragraph at lines 52--53
 \T1/zi4/m/n/10.95 cardiffnlp/twitter-roberta-base-hate
  []
 
-LaTeX Font Info:    External font `cmex10' loaded for size
-(Font)              <10.95> on input line 68.
 
 Overfull \hbox (19.99603pt too wide) in paragraph at lines 68--83
  [][] 
@@ -490,13 +494,16 @@ ocal/texlive/2024/texmf-dist/fonts/enc/dvips/cm-super/cm-super-t1.enc}
 
 {/usr/local/texlive/2024/texmf-dist/fonts/enc/dvips/cm-super/cm-super-ts1.enc}{
 /usr/local/texlive/2024/texmf-dist/fonts/enc/dvips/inconsolata/i4-t1-0.enc}]
-Underfull \hbox (badness 6332) in paragraph at lines 106--107
+Overfull \hbox (297.39696pt too wide) in paragraph at lines 111--120
+ [][] 
+ []
+
+
+Underfull \hbox (badness 6332) in paragraph at lines 123--124
 \T1/cmr/m/n/10.95 (+20) The er-ror anal-y-sis was cru-cial. For
  []
 
-[2
-
-] (./report.aux)
+[2] (./report.aux)
  ***********
 LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-02-20>
@@ -505,24 +512,26 @@ Package rerunfilecheck Info: File `report.out' has not changed.
 (rerunfilecheck)             Checksum: 0B110C313BEB70119991C7BB8D4F0FD0;1640.
  ) 
 Here is how much of TeX's memory you used:
- 14290 strings out of 474116
- 232107 string characters out of 5743682
+ 14348 strings out of 474116
+ 232874 string characters out of 5743682
  1948187 words of memory out of 5000000
- 36392 multiletter control sequences out of 15000+600000
- 570715 words of font info for 105 fonts, out of 8000000 for 9000
+ 36418 multiletter control sequences out of 15000+600000
+ 574604 words of font info for 123 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 90i,10n,93p,1003b,553s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 90i,10n,93p,1003b,547s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/local/texlive/2024/texmf-dist/fonts/type1/public/inconsolata/Inconsolat
 a-zi4r.pfb></usr/local/texlive/2024/texmf-dist/fonts/type1/public/cm-super/sfbx
 1095.pfb></usr/local/texlive/2024/texmf-dist/fonts/type1/public/cm-super/sfbx12
 00.pfb></usr/local/texlive/2024/texmf-dist/fonts/type1/public/cm-super/sfbx1440
-.pfb></usr/local/texlive/2024/texmf-dist/fonts/type1/public/cm-super/sfrm1000.p
-fb></usr/local/texlive/2024/texmf-dist/fonts/type1/public/cm-super/sfrm1095.pfb
->
-Output written on report.pdf (2 pages, 131088 bytes).
+.pfb></usr/local/texlive/2024/texmf-dist/fonts/type1/public/cm-super/sfrm0600.p
+fb></usr/local/texlive/2024/texmf-dist/fonts/type1/public/cm-super/sfrm0800.pfb
+></usr/local/texlive/2024/texmf-dist/fonts/type1/public/cm-super/sfrm0900.pfb><
+/usr/local/texlive/2024/texmf-dist/fonts/type1/public/cm-super/sfrm1000.pfb></u
+sr/local/texlive/2024/texmf-dist/fonts/type1/public/cm-super/sfrm1095.pfb>
+Output written on report.pdf (2 pages, 169333 bytes).
 PDF statistics:
- 99 PDF objects out of 1000 (max. 8388607)
- 81 compressed objects within 1 object stream
- 14 named destinations out of 1000 (max. 500000)
- 25169 words of extra memory for PDF output out of 29859 (max. 10000000)
+ 118 PDF objects out of 1000 (max. 8388607)
+ 94 compressed objects within 1 object stream
+ 16 named destinations out of 1000 (max. 500000)
+ 35409 words of extra memory for PDF output out of 35830 (max. 10000000)
 

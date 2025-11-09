@@ -48,7 +48,7 @@ This report analyzes two classifiers, a custom NER+BERT pipeline and a fine-tune
 \section{Introduction}
 Automated hate speech detection is a complex NLP task, challenged by subjectivity, context, and coded language. This report evaluates two Transformer-based models:
 \begin{itemize}
-    \item \textbf{NER+BERT:} A pipeline that first extracts Named Entities (NER) and then uses BERT for classification.
+    \item \textbf{NER+BERT:} A pipeline that first extracts Named Entities (NER) and then uses BERT for classification. \footnote{This is called Amphate in our code since I reference their paper for the implementation.}
     \item \textbf{RoBERTa:} A fine-tuned \texttt{cardiffnlp/twitter-roberta-base-hate} model.
 \end{itemize}
 Both models used weighted-class loss to handle data imbalance during training.
@@ -99,8 +99,25 @@ RoBERTa & Robust (Typos) & 0.9797 & 0.9200 & 0.8998 & 0.0189 \\
 \subsection{Effectiveness and Efficiency}
 \begin{itemize}
     \item \textbf{Effectiveness:} The RoBERTa model is demonstrably more effective. It has higher in-domain accuracy (98.4\% vs 96.3\%) and F1-score (0.937 vs 0.866). Critically, its strong calibration (ECE 0.0152) makes it a far more reliable and trustworthy model than the overconfident NER+BERT.
-    \item \textbf{Efficiency:} Here resource computation efficiency is focused, and the metrics are latency is analyzed by torch profile. Only inference time efficiency is analyzed due to time limit.
+    \item \textbf{Efficiency:} Here resource computation efficiency is focused, and the metrics are latency is analyzed by torch profile. Only inference time efficiency is analyzed, and training efficiency is not measured here in the report. Throughput and GPU memory consumption are also important and due to time limit and GPU resource limitation they are not performed in this experiment. See ~\ref{tab:latency_summary} for result.
+    
  \end{itemize}
+
+
+\begin{table}[htbp]
+\centering
+\caption{Comparative Latency of Main Inference Functions}
+\label{tab:latency_summary}
+\begin{tabular}{llcc}
+\toprule
+\textbf{Model Profiler} & \textbf{Main Function Name} & \textbf{Latency (CPU Total)} & \textbf{GPU Time (CUDA Total)} \\
+\midrule
+NER Profiler & \texttt{ner\_pipeline\_inference} & 11.968s & 3.068s \\
+BERT Profiler & \texttt{model\_forward\_pass} & 9.217s & 8.589s \\
+RoBERTa Profiler & \texttt{model\_forward\_pass} & 10.009s & 10.796s \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Insights from Error Analysis}
 The error analysis was crucial. For NER+BERT, the high ECE invalidates the model's high accuracy, as its confidence is meaningless. For RoBERTa, the low ECE and analysis of confident errors suggest the model is even more effective than the metrics show, identifying label noise in the dataset. This highlights that calibration (ECE) is a more critical metric than raw accuracy for model trustworthiness.
