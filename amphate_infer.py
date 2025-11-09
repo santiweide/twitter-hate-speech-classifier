@@ -144,10 +144,15 @@ def run_evaluation_pipeline(
     y_true = np.array(tokenized_eval_dataset["labels"]) 
     
     # Remove non-model columns
+    # --- THIS IS THE FIX ---
+    # We must keep "explicit_target_mask" as it is a model input.
+    model_input_names = ["input_ids", "attention_mask", "token_type_ids", "explicit_target_mask"]
     columns_to_remove = [
         col for col in tokenized_eval_dataset.column_names 
-        if col not in ["input_ids", "attention_mask", "token_type_ids"]
+        if col not in model_input_names
     ]
+    # --- END OF FIX ---
+    
     if columns_to_remove:
         tokenized_eval_dataset = tokenized_eval_dataset.remove_columns(columns_to_remove)
     tokenized_eval_dataset.set_format("torch")
@@ -173,7 +178,6 @@ def run_evaluation_pipeline(
     probabilities = torch.softmax(final_logits, dim=1).numpy()
     
     return y_true, probabilities
-
 
 def run_generalizability_and_robustness_experiments():
     """
