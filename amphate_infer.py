@@ -26,8 +26,10 @@ set_seed(TRAINING_SEED)
 
 # --- [NEW] --- 
 # 
-# ECE (Expected Calibration Error) 辅助函数
+# 辅助函数区域
 #
+# --- [END NEW] ---
+
 def expected_calibration_error(probs, labels, n_bins=10):
     """
     计算预期校准误差 (ECE) 和绘图所需的数据。
@@ -86,6 +88,52 @@ def expected_calibration_error(probs, labels, n_bins=10):
             bin_sizes.append(0)
             
     return ece, (bins, np.array(bin_accs), np.array(bin_confs), np.array(bin_sizes))
+
+# --- [NEW] --- 
+#
+# 切片分析 (Slice Analysis) 辅助函数
+#
+def has_target_entity(ner_list):
+    """检查NER结果列表是否包含任何目标实体"""
+    if not isinstance(ner_list, list): return False
+    # 使用从 amphate_model 导入的 TARGET_NER_LABELS
+    return any(e.get("entity_group") in TARGET_NER_LABELS for e in ner_list)
+
+def slice_metrics(df, slice_col):
+    """
+    计算数据切片 (slice) 的性能指标。
+    
+    参数:
+    df (pd.DataFrame): 包含 'correct', 'true_label', 'predicted_label' 的分析数据
+    slice_col (str): 用于分组的列名 (例如 'has_target_entity')
+    
+    返回:
+    pd.DataFrame: 包含 'n', 'acc', 'FPR', 'FNR' 的指标
+    """
+    
+    def get_metrics(sub_df):
+        if len(sub_df) == 0:
+            return pd.Series({
+                "n": 0, "acc": np.nan, "FPR": np.nan, "FNR": np.nan
+            })
+        
+        n = len(sub_df)
+        acc = sub_df["correct"].mean()
+        
+        # FPR (False Positive Rate) - 在此切片中，(真=0, 预=1) 的比例
+        # 这不是传统定义 (FP / N)，而是 (FP / N_slice)
+        fpr_slice = ((sub_df["true_label"] == 0) & (sub_df["predicted_label"] == 1)).sum() / n
+        
+        # FNR (False Negative Rate) - 在此切片中，(真=1, 预=0) 的比例
+        fnr_slice = ((sub_df["true_label"] == 1) & (sub_df["predicted_label"] == 0)).sum() / n
+        
+        return pd.Series({
+            "n": n, "acc": acc, "FPR": fpr_slice, "FNR": fnr_slice
+        })
+
+    # 按切片列分组并应用指标函数
+    grouped = df.groupby(slice_col).apply(get_metrics)
+    return grouped.reset_index()
 # --- [END NEW] ---
 
 
@@ -187,23 +235,18 @@ def run_inference_and_analysis():
     # --- 4. Error Analysis ---
     print("\n--- Error Analysis Results ---")
 
-    # --- [NEW] --- 
+    # --- 4.1. 基础 DataFrame 设置 ---
     # 1. 计算概率 (Probabilities) 和置信度 (Confidences)
-    #    从 logits 转换为概率分布
     probabilities = torch.softmax(final_logits, dim=1)
-    
-    # 获取最高概率（置信度）和对应的预测标签
     max_probs_tensor, pred_labels_tensor = torch.max(probabilities, axis=1)
     
     # 转换为 NumPy 数组
     pred_labels = pred_labels_tensor.numpy()
     max_probs = max_probs_tensor.numpy()
     y_prob = probabilities.numpy() # (N_samples, N_classes) 
-    # --- [END NEW] ---
 
     original_texts = test_dataset_raw["text"]
     
-    # --- [NEW] --- 
     # 2. 将置信度添加到分析 DataFrame 中
     df_analysis = pd.DataFrame({
         "text": original_texts,
@@ -222,18 +265,16 @@ def run_inference_and_analysis():
 
     # 按置信度降序排列错误 —— 优先查看模型“非常自信但错了”的样本
     df_errors_sorted = df_errors.sort_values(by="confidence", ascending=False)
-    # --- [END NEW] ---
 
     total_samples = len(df_analysis)
     total_errors = len(df_errors)
     accuracy = 1 - (total_errors / total_samples)
     
-    print(f"Total test samples: {total_samples}")
+    print(f"\nTotal test samples: {total_samples}")
     print(f"Prediction errors: {total_errors}")
     print(f"Test Set Accuracy: {accuracy * 100 :.2f}%")
 
-    # --- [NEW] --- 
-    # 3. 计算和绘制 ECE 及可靠性图
+    # --- 4.2. 校准分析 (Calibration Analysis) ---
     print("\n--- Calibration Analysis (Reliability) ---")
     n_bins = 15
     ece, (bins, bacc, bconf, bsize) = expected_calibration_error(y_prob, y_true, n_bins=n_bins)
@@ -241,46 +282,96 @@ def run_inference_and_analysis():
 
     # 开始绘图
     fig = plt.figure(figsize=(8, 6)) # 设置图像大小
-    
-    # 绘制理想的“完美校准”对角线
     plt.plot([0,1],[0,1], linestyle="--", color="gray", label="Perfect Calibration")
-    
-    # 计算每个 bin 的中心点
     centers = (bins[:-1] + bins[1:]) / 2
-    # 创建一个 mask，只选择那些有数据（非nan）的 bin
     mask = ~np.isnan(bacc)
     
     if mask.any():
-        # 绘制柱状图 (Bin Accuracy)
-        # width 是每个 bin 的宽度
         plt.bar(centers[mask], bacc[mask], width=(bins[1]-bins[0]), alpha=0.6, 
                 edgecolor="black", label="Bin Accuracy")
-        
-        # 绘制折线图 (Bin Avg. Confidence)
-        # 连接 bin 中心的平均置信度点
         plt.plot(centers[mask], bconf[mask], marker="o", linestyle="-", 
                  color="red", label="Bin Avg. Confidence")
     
     plt.title(f"Reliability Diagram (ECE={ece:.3f})")
     plt.xlabel("Confidence (Predicted Probability)")
     plt.ylabel("Accuracy (Fraction of Positives)")
-    plt.legend()       # 显示图例
-    plt.grid(alpha=0.3) # 添加网格
-    plt.tight_layout() # 自动调整布局
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.tight_layout() 
     
-    # 保存图像
     plot_file = analysis_dir / "reliability_diagram.png"
     fig.savefig(plot_file, dpi=180)
     print(f"Reliability diagram saved to: {plot_file}")
-    # --- [END NEW] ---
+    
+    
+    # --- [NEW] ---
+    # --- 4.3. 切片分析 (Slice-based Analysis) ---
+    print("\n--- Slice-based Analysis (NER) ---")
+    
+    # 我们需要原始的 test_dataset_raw 来访问 'ner_results'
+    # 将其转换为 pandas DF
+    test_df = test_dataset_raw.to_pandas()
+    
+    # 为 df_analysis 添加 'correct' 列，以便 slice_metrics 函数使用
+    df_analysis["correct"] = (df_analysis["true_label"] == df_analysis["predicted_label"])
+    
+    # --- 4.3a. 'has_target_entity' 切片 ---
+    
+    # 从 test_df (包含 ner_results) 重建 'has_target_entity' 标志
+    # df_analysis 和 test_df 的顺序是一致的
+    df_analysis["has_target_entity"] = test_df["ner_results"].map(has_target_entity).astype(int)
+    
+    # 调用 slice_metrics 辅助函数
+    target_slice_metrics = slice_metrics(df_analysis, "has_target_entity")
+    target_slice_file = analysis_dir / "slice_has_target_entity.csv"
+    target_slice_metrics.to_csv(target_slice_file, index=False)
+    
+    print("Metrics for 'has_target_entity' slice (1 = True):")
+    print(target_slice_metrics.to_string(index=False))
+    print(f"Saved to: {target_slice_file}")
 
+    # --- 4.3b. 'per_entity_type' 切片 ---
+    
+    rows = []
+    # 使用从 amphate_model 导入的 TARGET_NER_LABELS
+    for ent in sorted(TARGET_NER_LABELS):
+        # 创建掩码 (mask)，检查 test_df 中的 ner_results
+        mask = test_df["ner_results"].map(lambda lst: any((isinstance(lst, list) and e.get("entity_group")==ent) for e in (lst or [])))
+        
+        # 将掩码应用于 df_analysis
+        sub = df_analysis[mask]
+        
+        if len(sub) > 0:
+            # 计算指标
+            rows.append({
+                "entity_type": ent,
+                "n": len(sub),
+                "acc": sub["correct"].mean(),
+                # 使用 df_analysis 的列名
+                "FPR": ((sub["true_label"] == 0) & (sub["predicted_label"] == 1)).sum() / len(sub),
+                "FNR": ((sub["true_label"] == 1) & (sub["predicted_label"] == 0)).sum() / len(sub),
+            })
+    
+    if rows:
+        per_ent_metrics = pd.DataFrame(rows).sort_values("acc")
+        per_ent_file = analysis_dir / "slice_per_entity.csv"
+        per_ent_metrics.to_csv(per_ent_file, index=False)
+        print(f"\nSaved per-entity slice metrics to: {per_ent_file}")
+        print("Per-entity slice metrics:")
+        print(per_ent_metrics.to_string(index=False))
+    else:
+        print("\nNo samples found for any target entity types.")
+    # --- [END NEW] ---
+    
+
+    # --- 4.4. 错误样本定性分析 (Qualitative Analysis) ---
     if total_errors > 0:
         print("\n--- Most Confident Error Samples ---")
         pd.set_option('display.max_colwidth', None)
         pd.set_option('display.max_rows', 100)
         
         # 打印按置信度排序的错误
-        print(df_errors_sorted.head(20).to_string()) 
+        print(df_errors_sorted.head(20).to_string(index=False)) 
         
         # 保存排序后的错误文件
         error_file = analysis_dir / "error_analysis_sorted.csv"
